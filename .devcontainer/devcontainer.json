@@ -1,15 +1,10 @@
 {
   "name": "Compiler Dev",
   "image": "maxxing/compiler-dev",
-  // 工作目录
   "workspaceFolder": "/root/compiler",
-  // 使用 root 用户避免 UID 映射问题（你的镜像本来就是 root）
   "remoteUser": "root",
-  // 禁用 JetBrains 的自动 UID/GID 更新（因为用 root 不需要）
   "updateRemoteUserUID": false,
-  // 保持容器运行
   "overrideCommand": false,
-//   // RustRover 特定配置
 //   "customizations": {
 //     "jetbrains": {
 //       "settings": {
