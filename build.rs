@@ -1,3 +1,4 @@
 fn main() {
-    lalrpop::process_root().unwrap();
+    println!("cargo:rerun-if-changed=src/sysy.lalrpop");
+    lalrpop::process_root().expect("failed to process lalrpop grammar");
 }

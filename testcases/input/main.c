@@ -1,4 +1,0 @@
-int main(int a, int b) {
-  // 忽略我的存在
-  return 0;
-}
