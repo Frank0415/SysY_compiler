@@ -1,3 +1,4 @@
+use compiler::ast::{Block, Stmt, Expr};
 use compiler::sysy;
 use std::fs;
 
@@ -11,5 +12,9 @@ fn test_case_1() {
 
     // Basic verification that it's a valid AST
     assert_eq!(ast.func_def.ident, "main");
-    // You mentioned not to check if something is extra, so we just verify the core structure
+    
+    let expected_block = Block {
+        stmt: vec![Stmt::Return(Expr::Number(0))],
+    };
+    assert_eq!(ast.func_def.block, expected_block);
 }
