@@ -1,13 +1,7 @@
-mod ast;
-
-use lalrpop_util::lalrpop_mod;
+use compiler::sysy;
 use std::env::args;
 use std::fs::read_to_string;
 use std::io::Result;
-
-// 引用 lalrpop 生成的解析器
-// 因为我们刚刚创建了 sysy.lalrpop, 所以模块名是 sysy
-lalrpop_mod!(pub sysy);
 
 //noinspection ALL,RsUnresolvedPath
 fn main() -> Result<()> {
