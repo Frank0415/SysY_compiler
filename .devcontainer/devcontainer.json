@@ -1,0 +1,29 @@
+{
+  "name": "Compiler Dev",
+  "image": "maxxing/compiler-dev",
+  // 工作目录
+  "workspaceFolder": "/root/compiler",
+  // 使用 root 用户避免 UID 映射问题（你的镜像本来就是 root）
+  "remoteUser": "root",
+  // 禁用 JetBrains 的自动 UID/GID 更新（因为用 root 不需要）
+  "updateRemoteUserUID": false,
+  // 保持容器运行
+  "overrideCommand": false,
+//   // RustRover 特定配置
+//   "customizations": {
+//     "jetbrains": {
+//       "settings": {
+//         // 容器内 Rust 工具链路径（根据实际镜像调整）
+//         "org.rust.cargo.toolchain": "/root/.cargo/bin",
+//         "org.rust.rustfmt.path": "/root/.cargo/bin/rustfmt"
+//       }
+//     }
+//   },
+  "containerEnv": {
+    "HTTP_PROXY": "http://172.17.0.1:7890",
+    "HTTPS_PROXY": "http://172.17.0.1:7890",
+    "http_proxy": "http://172.17.0.1:7890",
+    "https_proxy": "http://172.17.0.1:7890",
+    "NO_PROXY": "localhost,127.0.0.1,.local,.internal"
+  },
+}
