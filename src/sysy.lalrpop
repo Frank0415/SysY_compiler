@@ -19,13 +19,12 @@ pub CompUnit: CompUnit = <func_def: FuncDef> => CompUnit { func_def };
 
 // 同上, 不解释
 FuncDef: FuncDef = {
-  <func_type: FuncType> <ident: Ident> "(" <func_params: FuncFParams> ")" <block: Block> => {
+  <func_type: RawType> <ident: Ident> "(" <func_params: FuncFParams> ")" <block: Block> => {
     FuncDef { func_type, ident, func_params, block }
   }
 }
 
-FuncType: FuncType = "int" => FuncType::Int;
-Type: Type = "int" => Type::Int;
+RawType: RawType = "int" => RawType::Int;
 
 Block: Block = "{" <stmt: StmtList> "}" => Block { stmt };
 StmtList = <Stmt*>;
@@ -41,7 +40,7 @@ FuncFParams: Vec<FuncFParam> = {
         params
     }
 }
-FuncFParam: FuncFParam = <bt: Type> <id: Ident> => FuncFParam { bt, id };
+FuncFParam: FuncFParam = <bt: RawType> <id: Ident> => FuncFParam { bt, id };
 
 // 如果匹配到标识符, 就返回这个字符串
 // 一对尖括号在此处指代的是正则表达式匹配到的字符串 (&str)
