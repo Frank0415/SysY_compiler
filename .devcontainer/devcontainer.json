@@ -4,8 +4,7 @@
   "workspaceFolder": "/root/compiler",
   "remoteUser": "root",
   "updateRemoteUserUID": false,
-  "overrideCommand": false,
-//   "customizations": {
+////   "customizations": {
 //     "jetbrains": {
 //       "settings": {
 //         // 容器内 Rust 工具链路径（根据实际镜像调整）
