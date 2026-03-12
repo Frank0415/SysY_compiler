@@ -82,7 +82,7 @@ fn process_block(block: Block, func_data: &mut FunctionData, bb: BasicBlock) {
 fn type_to_ir(typ: RawType) -> types::Type {
     match typ {
         RawType::Int => Type::get_i32(),
-        default => Type::get_unit(),
+        _ => Type::get_unit(),
     }
 }
 
