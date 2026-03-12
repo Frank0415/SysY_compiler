@@ -1,18 +1,23 @@
-use clap::Parser;
-use compiler::arg::Args;
-use compiler::ir::ir_gen;
+use compiler::gen_ir::{gen_ir, gen_text_ir};
 use compiler::sysy;
-use koopa::back::KoopaGenerator;
-use std::fs::read_to_string;
+use compiler::gen_asm::GenAsm;
+
+use std::env::args;
+use std::fs::{read_to_string, write};
 use std::io::Result;
 use std::process::exit;
 
 fn main() -> Result<()> {
     // 解析命令行参数
-    let args = Args::parse();
+    let mut args = args();
+    args.next();
+    let _mode = args.next().expect("Expected mode (e.g., -koopa)");
+    let input = args.next().expect("Expected input file");
+    args.next(); // Skip -o
+    let output = args.next().expect("Expected output file");
 
     // 读取输入文件
-    let input_content = read_to_string(&args.input)?;
+    let input_content = read_to_string(&input)?;
 
     // 调用 lalrpop 生成的 parser 解析输入文件
     let parser = sysy::CompUnitParser::new();
@@ -27,10 +32,11 @@ fn main() -> Result<()> {
 
     // 输出解析得到的 AST
     println!("{:#?}", ast);
-    let ir = ir_gen(ast).unwrap();
-    let mut g = KoopaGenerator::new(Vec::new());
-    g.generate_on(&ir).unwrap();
-    let text_form_ir = std::str::from_utf8(&g.writer()).unwrap().to_string();
+    let program = gen_ir(ast).unwrap();
+    let text_form_ir = gen_text_ir(&program);
     println!("{}", text_form_ir);
+    let asm = program.gen_asm().unwrap();
+    write(output, asm)?;
+
     Ok(())
 }
