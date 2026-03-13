@@ -8,6 +8,7 @@
  * RawType instead of Type here:
  * is to prevent confusion from koopa::ir::Type
  */
+use std::boxed::Box;
 
 #[derive(Debug, PartialEq)]
 pub struct CompUnit {
@@ -34,18 +35,33 @@ pub struct FuncFParam {
     pub id: String,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub enum Stmt {
-    Return(Expr), // 语句类型之一：返回语句
-                  // 后续扩展：Declare, Assign, If, While 等
+    Return(Exp), // 语句类型之一：返回语句
+                 // 后续扩展：Declare, Assign, If, While 等
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Expr {
+pub enum UnaryExp {}
+
+#[derive(PartialEq)]
+pub enum Exp {
     Number(i32),
+    
+    Unary {
+        op: UnaryOp,
+        exp: Box<Exp>,
+    },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
+pub enum UnaryOp {
+    Plus,
+    Minus,
+    Not,
+}
+
+#[derive(PartialEq)]
 pub struct Block {
     pub stmt: Vec<Stmt>,
 }
