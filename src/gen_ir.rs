@@ -1,4 +1,5 @@
-use crate::ast::{Block, CompUnit, Expr, FuncDef, FuncFParam, RawType, Stmt};
+use crate::ast::UnaryOp;
+use crate::ast::{Block, CompUnit, Exp, FuncDef, FuncFParam, RawType, Stmt};
 use koopa::back::KoopaGenerator;
 use koopa::ir::{builder_traits::*, types::*, *};
 use std::fmt::Error;
@@ -49,7 +50,7 @@ pub fn gen_ir(cu: CompUnit) -> Result<Program, Error> {
 
 fn process_func_params(func_params: Vec<FuncFParam>) -> Vec<(Option<String>, Type)> {
     let mut params: Vec<(Option<String>, Type)> = Vec::new();
-    for param in func_params{
+    for param in func_params {
         let typ = type_to_ir(param.bt);
         let name = format!("%{}", param.id);
         params.push((Some(name), typ));
@@ -57,32 +58,73 @@ fn process_func_params(func_params: Vec<FuncFParam>) -> Vec<(Option<String>, Typ
     return params;
 }
 
+pub trait ProcessIr {
+    fn process_to_ir(&self, func_data: &mut FunctionData, bb: BasicBlock) -> Value;
+}
+
+impl ProcessIr for Exp {
+    fn process_to_ir(&self, func_data: &mut FunctionData, bb: BasicBlock) -> Value {
+        match self {
+            Exp::Number(val) => func_data.dfg_mut().new_value().integer(*val),
+            Exp::Unary { op, exp } => {
+                let val = exp.process_to_ir(func_data, bb);
+                match op {
+                    UnaryOp::Plus => val,
+                    UnaryOp::Minus => {
+                        let zero = func_data.dfg_mut().new_value().integer(0);
+                        let sub = func_data
+                            .dfg_mut()
+                            .new_value()
+                            .binary(BinaryOp::Sub, zero, val);
+                        func_data
+                            .layout_mut()
+                            .bb_mut(bb)
+                            .insts_mut()
+                            .push_key_back(sub)
+                            .unwrap();
+                        sub
+                    }
+                    UnaryOp::Not => {
+                        let zero = func_data.dfg_mut().new_value().integer(0);
+                        let eq = func_data
+                            .dfg_mut()
+                            .new_value()
+                            .binary(BinaryOp::Eq, val, zero);
+                        func_data
+                            .layout_mut()
+                            .bb_mut(bb)
+                            .insts_mut()
+                            .push_key_back(eq)
+                            .unwrap();
+                        eq
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn process_block(block: Block, func_data: &mut FunctionData, bb: BasicBlock) {
     for stmt in block.stmt {
         match stmt {
-            Stmt::Return(Expr::Number(val)) => {
-                // 提取出的数字 0
-                let ret_val: Value = func_data.dfg_mut().new_value().integer(val);
-
-                // 创建 Return 指令
+            Stmt::Return(exp) => {
+                let ret_val = exp.process_to_ir(func_data, bb);
                 let ret_inst = func_data.dfg_mut().new_value().ret(Some(ret_val));
-
-                // 将指令插入基本块
                 func_data
                     .layout_mut()
                     .bb_mut(bb)
                     .insts_mut()
                     .push_key_back(ret_inst)
                     .unwrap();
-            } // 后续扩展可在 match 中添加更多语句提取逻辑
+            }
         }
     }
 }
 
-fn type_to_ir(typ: RawType) -> types::Type {
+fn type_to_ir(typ: RawType) -> Type {
     match typ {
         RawType::Int => Type::get_i32(),
-        _ => Type::get_unit(),
+        RawType::Null => Type::get_unit(),
     }
 }
 

@@ -1,4 +1,4 @@
-use compiler::ast::{Block, Stmt, Expr};
+use compiler::ast::{Block, Stmt, Exp};
 use compiler::sysy;
 use std::fs;
 
@@ -14,7 +14,7 @@ fn test_case_1() {
     assert_eq!(ast.func_def.ident, "main");
     
     let expected_block = Block {
-        stmt: vec![Stmt::Return(Expr::Number(0))],
+        stmt: vec![Stmt::Return(Exp::Number(0))],
     };
     assert_eq!(ast.func_def.block, expected_block);
 }
