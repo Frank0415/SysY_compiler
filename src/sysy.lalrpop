@@ -1,5 +1,6 @@
 // use std::str::FromStr;
 use crate::ast::*;
+use std::boxed::Box;
 // lalrpop 里的约定
 grammar;
 
@@ -28,9 +29,22 @@ RawType: RawType = "int" => RawType::Int;
 
 Block: Block = "{" <stmt: StmtList> "}" => Block { stmt };
 StmtList = <Stmt*>;
-Stmt: Stmt = "return" <num: Number> ";" => Stmt::Return(num);
-
-Number: Expr = <num: IntConst> => Expr::Number(num);
+Stmt: Stmt = "return" <exp: Exp> ";" => Stmt::Return(exp);
+Exp: Exp = <UnaryExp>;
+UnaryExp: Exp = {
+    <pexp: PrimaryExp> => pexp,
+    <uop: UnaryOp> <uexp: UnaryExp> => Exp::Unary{op:uop, exp:Box::new(uexp)},
+}
+PrimaryExp: Exp = {
+    "(" <exp: Exp> ")" => exp,
+    <num: Number> => num,
+}
+UnaryOp: UnaryOp = {
+    "+" => UnaryOp::Plus,
+    "-" => UnaryOp::Minus,
+    "!" => UnaryOp::Not,
+}
+Number: Exp = <num: IntConst> => Exp::Number(num);
 
 FuncFParams: Vec<FuncFParam> = {
     () => Vec::new(),
