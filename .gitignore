@@ -110,3 +110,5 @@ http-client.private.env.json
 # Added by cargo
 
 /target
+
+*.koopa
