@@ -6,6 +6,7 @@ impl Debug for Exp {
         match self {
             Exp::Number(n) => write!(f, "{}", n),
             Exp::Unary { op, exp } => write!(f, "({:?} {:?})", op, exp),
+            Exp::Binary { op, lhs, rhs } => write!(f, "({:?} {:?} {:?})", lhs, op, rhs),
         }
     }
 }
@@ -16,6 +17,18 @@ impl Debug for UnaryOp {
             UnaryOp::Plus => write!(f, "+"),
             UnaryOp::Minus => write!(f, "-"),
             UnaryOp::Not => write!(f, "not"),
+        }
+    }
+}
+
+impl Debug for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BinaryOp::Add => write!(f, "+"),
+            BinaryOp::Sub => write!(f, "-"),
+            BinaryOp::Mul => write!(f, "*"),
+            BinaryOp::Div => write!(f, "/"),
+            BinaryOp::Mod => write!(f, "%"),
         }
     }
 }

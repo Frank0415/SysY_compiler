@@ -55,7 +55,7 @@ fn process_func_params(func_params: Vec<FuncFParam>) -> Vec<(Option<String>, Typ
         let name = format!("%{}", param.id);
         params.push((Some(name), typ));
     }
-    return params;
+    params
 }
 
 pub trait ProcessIr {
@@ -100,6 +100,32 @@ impl ProcessIr for Exp {
                     }
                 }
             }
+            Exp::Binary {
+                op,
+                lhs,
+                rhs,
+            } => {
+                let lhs_val = lhs.process_to_ir(func_data, bb);
+                let rhs_val = rhs.process_to_ir(func_data, bb);
+                let ir_op = match op {
+                    crate::ast::BinaryOp::Add => BinaryOp::Add,
+                    crate::ast::BinaryOp::Sub => BinaryOp::Sub,
+                    crate::ast::BinaryOp::Mul => BinaryOp::Mul,
+                    crate::ast::BinaryOp::Div => BinaryOp::Div,
+                    crate::ast::BinaryOp::Mod => BinaryOp::Mod,
+                };
+                let bin = func_data
+                    .dfg_mut()
+                    .new_value()
+                    .binary(ir_op, lhs_val, rhs_val);
+                func_data
+                    .layout_mut()
+                    .bb_mut(bb)
+                    .insts_mut()
+                    .push_key_back(bin)
+                    .unwrap();
+                bin
+            }
         }
     }
 }
@@ -117,7 +143,6 @@ fn process_block(block: Block, func_data: &mut FunctionData, bb: BasicBlock) {
                     .push_key_back(ret_inst)
                     .unwrap();
             }
-            
         }
     }
 }

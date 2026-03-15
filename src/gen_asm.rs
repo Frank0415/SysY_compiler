@@ -64,7 +64,6 @@ impl LocalGenAsm for ValueData {
         println!("Translating instruction: {:?}", self.kind());
         self.used_by();
         match self.kind() {
-
             ValueKind::Return(ret) => {
                 let mut res = String::new();
                 if let Some(v) = ret.value() {
@@ -77,7 +76,6 @@ impl LocalGenAsm for ValueData {
                         }
                         _ => unreachable!(),
                     }
-                    
                 }
                 res += "\tret\n";
                 res
@@ -89,21 +87,19 @@ impl LocalGenAsm for ValueData {
                     .expect("Please implement stack regs logic!")
                     .clone();
                 let op = match bin.op() {
-                    koopa::ir::BinaryOp::Add => format!("add"),
-                    koopa::ir::BinaryOp::Sub => {
-                        return process_sub_inst(bin, dfg, reg_alloc, target);
-                    }
-                    koopa::ir::BinaryOp::Mul => format!("mul"),
-                    koopa::ir::BinaryOp::Div => format!("div"),
+                    koopa::ir::BinaryOp::Add => return process_add_inst(bin, dfg, reg_alloc, target),
+                    koopa::ir::BinaryOp::Sub => return process_sub_inst(bin, dfg, reg_alloc, target),
+                    koopa::ir::BinaryOp::Mul => return process_mul_inst(bin, dfg, reg_alloc, target),
+                    koopa::ir::BinaryOp::Div => return process_div_inst(bin, dfg, reg_alloc, target),
                     koopa::ir::BinaryOp::Eq => return process_eq_inst(bin, dfg, reg_alloc, target),
                     _ => unimplemented!(),
                 };
-                return format!(
+                format!(
                     "placeholder for binary operation: {} op#1: {:?}, op#2: {:?}\n",
                     op,
                     bin.lhs(),
                     bin.rhs()
-                );
+                )
             }
             _ => unreachable!(),
         }
@@ -139,6 +135,51 @@ fn process_sub_inst(
     let leftreg = s[1].as_ref().unwrap();
     let rightreg = s[2].as_ref().unwrap();
     asm += &format!("\tsub\t{}, {}, {}\n", target, leftreg, rightreg);
+    asm
+}
+
+fn process_add_inst(
+    bin: &Binary,
+    dfg: &DataFlowGraph,
+    reg_alloc: &LinearScanAlloc,
+    target: String,
+) -> String {
+    let mut asm: String = String::new();
+    let s = load_temp_int(bin, dfg, reg_alloc);
+    asm += &s[0].as_ref().unwrap();
+    let leftreg = s[1].as_ref().unwrap();
+    let rightreg = s[2].as_ref().unwrap();
+    asm += &format!("\tadd\t{}, {}, {}\n", target, leftreg, rightreg);
+    asm
+}
+
+fn process_mul_inst(
+    bin: &Binary,
+    dfg: &DataFlowGraph,
+    reg_alloc: &LinearScanAlloc,
+    target: String,
+) -> String {
+    let mut asm: String = String::new();
+    let s = load_temp_int(bin, dfg, reg_alloc);
+    asm += &s[0].as_ref().unwrap();
+    let leftreg = s[1].as_ref().unwrap();
+    let rightreg = s[2].as_ref().unwrap();
+    asm += &format!("\tmul\t{}, {}, {}\n", target, leftreg, rightreg);
+    asm
+}
+
+fn process_div_inst(
+    bin: &Binary,
+    dfg: &DataFlowGraph,
+    reg_alloc: &LinearScanAlloc,
+    target: String,
+) -> String {
+    let mut asm: String = String::new();
+    let s = load_temp_int(bin, dfg, reg_alloc);
+    asm += &s[0].as_ref().unwrap();
+    let leftreg = s[1].as_ref().unwrap();
+    let rightreg = s[2].as_ref().unwrap();
+    asm += &format!("\tdiv\t{}, {}, {}\n", target, leftreg, rightreg);
     asm
 }
 
@@ -182,5 +223,5 @@ fn load_temp_int(
         rightreg = reg_alloc.get_reg(op2).cloned();
     }
 
-    return vec![Some(asm), leftreg, rightreg];
+    vec![Some(asm), leftreg, rightreg]
 }

@@ -47,10 +47,15 @@ pub enum UnaryExp {}
 #[derive(PartialEq)]
 pub enum Exp {
     Number(i32),
-    
+
     Unary {
         op: UnaryOp,
         exp: Box<Exp>,
+    },
+    Binary {
+        op: BinaryOp,
+        lhs: Box<Exp>,
+        rhs: Box<Exp>,
     },
 }
 
@@ -59,6 +64,15 @@ pub enum UnaryOp {
     Plus,
     Minus,
     Not,
+}
+
+#[derive(PartialEq)]
+pub enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
 }
 
 #[derive(PartialEq)]
