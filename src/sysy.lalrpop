@@ -30,7 +30,21 @@ RawType: RawType = "int" => RawType::Int;
 Block: Block = "{" <stmt: StmtList> "}" => Block { stmt };
 StmtList = <Stmt*>;
 Stmt: Stmt = "return" <exp: Exp> ";" => Stmt::Return(exp);
-Exp: Exp = <UnaryExp>;
+Exp: Exp = <AddExp>;
+
+AddExp: Exp = {
+  <lhs: AddExp> "+" <rhs: MulExp> => Exp::Binary { op: BinaryOp::Add, lhs: Box::new(lhs), rhs: Box::new(rhs) },
+  <lhs: AddExp> "-" <rhs: MulExp> => Exp::Binary { op: BinaryOp::Sub, lhs: Box::new(lhs), rhs: Box::new(rhs) },
+  <exp: MulExp> => exp,
+}
+
+MulExp: Exp = {
+  <lhs: MulExp> "*" <rhs: UnaryExp> => Exp::Binary { op: BinaryOp::Mul, lhs: Box::new(lhs), rhs: Box::new(rhs) },
+  <lhs: MulExp> "/" <rhs: UnaryExp> => Exp::Binary { op: BinaryOp::Div, lhs: Box::new(lhs), rhs: Box::new(rhs) },
+  <lhs: MulExp> "%" <rhs: UnaryExp> => Exp::Binary { op: BinaryOp::Mod, lhs: Box::new(lhs), rhs: Box::new(rhs) },
+  <exp: UnaryExp> => exp,
+}
+
 UnaryExp: Exp = {
     <pexp: PrimaryExp> => pexp,
     <uop: UnaryOp> <uexp: UnaryExp> => Exp::Unary{op:uop, exp:Box::new(uexp)},
