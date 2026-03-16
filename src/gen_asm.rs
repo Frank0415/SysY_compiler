@@ -1,12 +1,11 @@
-use std::fmt::Error;
-
 use koopa::ir::ValueKind;
 use koopa::ir::dfg::DataFlowGraph;
 use koopa::ir::entities::ValueData;
 use koopa::ir::values::Binary;
 use koopa::ir::{FunctionData, Program, Value};
+use std::fmt::Error;
 
-use crate::reg_alloc::{self, LinearScanAlloc};
+use crate::reg_alloc::LinearScanAlloc;
 
 pub trait GenAsm {
     fn gen_asm(&self) -> Result<String, Error>;
@@ -68,11 +67,18 @@ impl LocalGenAsm for ValueData {
                 let mut res = String::new();
                 if let Some(v) = ret.value() {
                     match dfg.value(v).kind() {
-                        ValueKind::Integer(int) => { // 处理立即数返回值
+                        ValueKind::Integer(int) => {
+                            // 处理立即数返回值
                             res += &format!("\tli a0, {}\n", int.value());
                         }
-                        ValueKind::Binary(_) => { // 处理二元操作返回值
-                            res += &format!("\tmv a0, {}\n", reg_alloc.get_reg(v).expect("Please implement stack feature")); // 假设结果在 t5 寄存器中
+                        ValueKind::Binary(_) => {
+                            // 处理二元操作返回值
+                            res += &format!(
+                                "\tmv a0, {}\n",
+                                reg_alloc
+                                    .get_reg(v)
+                                    .expect("Please implement stack feature")
+                            ); // 假设结果在 t5 寄存器中
                         }
                         _ => unreachable!(),
                     }
@@ -86,20 +92,27 @@ impl LocalGenAsm for ValueData {
                     .get_reg(*value)
                     .expect("Please implement stack regs logic!")
                     .clone();
-                let op = match bin.op() {
-                    koopa::ir::BinaryOp::Add => return process_add_inst(bin, dfg, reg_alloc, target),
-                    koopa::ir::BinaryOp::Sub => return process_sub_inst(bin, dfg, reg_alloc, target),
-                    koopa::ir::BinaryOp::Mul => return process_mul_inst(bin, dfg, reg_alloc, target),
-                    koopa::ir::BinaryOp::Div => return process_div_inst(bin, dfg, reg_alloc, target),
-                    koopa::ir::BinaryOp::Eq => return process_eq_inst(bin, dfg, reg_alloc, target),
-                    _ => unimplemented!(),
-                };
-                format!(
-                    "placeholder for binary operation: {} op#1: {:?}, op#2: {:?}\n",
-                    op,
-                    bin.lhs(),
-                    bin.rhs()
-                )
+                match bin.op() {
+                    koopa::ir::BinaryOp::Add => process_inst(bin, dfg, reg_alloc, target, "add"),
+                    koopa::ir::BinaryOp::Sub => process_inst(bin, dfg, reg_alloc, target, "sub"),
+                    koopa::ir::BinaryOp::Mul => process_inst(bin, dfg, reg_alloc, target, "mul"),
+                    koopa::ir::BinaryOp::Div => process_inst(bin, dfg, reg_alloc, target, "div"),
+                    koopa::ir::BinaryOp::Mod => process_inst(bin, dfg, reg_alloc, target, "rem"),
+                    koopa::ir::BinaryOp::Eq => process_eq_inst(bin, dfg, reg_alloc, target),
+                    koopa::ir::BinaryOp::NotEq => process_neq_inst(bin, dfg, reg_alloc, target),
+                    koopa::ir::BinaryOp::Lt => process_inst(bin, dfg, reg_alloc, target, "slt"),
+                    koopa::ir::BinaryOp::Gt => process_inst(bin, dfg, reg_alloc, target, "sgt"),
+                    koopa::ir::BinaryOp::Le => process_le_inst(bin, dfg, reg_alloc, target),
+                    koopa::ir::BinaryOp::Ge => process_ge_inst(bin, dfg, reg_alloc, target),
+                    koopa::ir::BinaryOp::And => process_and_inst(bin, dfg, reg_alloc, target),
+                    koopa::ir::BinaryOp::Or => process_or_inst(bin, dfg, reg_alloc, target),
+                    _ => format!(
+                        "placeholder for binary operation: {:?} op#1: {:?}, op#2: {:?}\n",
+                        bin.op(),
+                        bin.lhs(),
+                        bin.rhs()
+                    ),
+                }
             }
             _ => unreachable!(),
         }
@@ -123,7 +136,7 @@ fn process_eq_inst(
     asm
 }
 
-fn process_sub_inst(
+fn process_neq_inst(
     bin: &Binary,
     dfg: &DataFlowGraph,
     reg_alloc: &LinearScanAlloc,
@@ -134,11 +147,12 @@ fn process_sub_inst(
     asm += &s[0].as_ref().unwrap();
     let leftreg = s[1].as_ref().unwrap();
     let rightreg = s[2].as_ref().unwrap();
-    asm += &format!("\tsub\t{}, {}, {}\n", target, leftreg, rightreg);
+    asm += &format!("\txor\t{}, {}, {}\n", target, leftreg, rightreg);
+    asm += &format!("\tsnez\t{}, {}\n", target, target);
     asm
 }
 
-fn process_add_inst(
+fn process_le_inst(
     bin: &Binary,
     dfg: &DataFlowGraph,
     reg_alloc: &LinearScanAlloc,
@@ -149,11 +163,13 @@ fn process_add_inst(
     asm += &s[0].as_ref().unwrap();
     let leftreg = s[1].as_ref().unwrap();
     let rightreg = s[2].as_ref().unwrap();
-    asm += &format!("\tadd\t{}, {}, {}\n", target, leftreg, rightreg);
+    // a <= b is !(a > b) -> !(sgt target, left, right)
+    asm += &format!("\tsgt\t{}, {}, {}\n", target, leftreg, rightreg);
+    asm += &format!("\tseqz\t{}, {}\n", target, target);
     asm
 }
 
-fn process_mul_inst(
+fn process_ge_inst(
     bin: &Binary,
     dfg: &DataFlowGraph,
     reg_alloc: &LinearScanAlloc,
@@ -164,11 +180,13 @@ fn process_mul_inst(
     asm += &s[0].as_ref().unwrap();
     let leftreg = s[1].as_ref().unwrap();
     let rightreg = s[2].as_ref().unwrap();
-    asm += &format!("\tmul\t{}, {}, {}\n", target, leftreg, rightreg);
+    // a >= b is !(a < b) -> !(slt target, left, right)
+    asm += &format!("\tslt\t{}, {}, {}\n", target, leftreg, rightreg);
+    asm += &format!("\tseqz\t{}, {}\n", target, target);
     asm
 }
 
-fn process_div_inst(
+fn process_and_inst(
     bin: &Binary,
     dfg: &DataFlowGraph,
     reg_alloc: &LinearScanAlloc,
@@ -179,7 +197,45 @@ fn process_div_inst(
     asm += &s[0].as_ref().unwrap();
     let leftreg = s[1].as_ref().unwrap();
     let rightreg = s[2].as_ref().unwrap();
-    asm += &format!("\tdiv\t{}, {}, {}\n", target, leftreg, rightreg);
+    // Logical AND: (lhs != 0) && (rhs != 0)
+    asm += &format!("\tsnez\tt0, {}\n", leftreg);
+    asm += &format!("\tsnez\tt1, {}\n", rightreg);
+    asm += &format!("\tand\t{}, t0, t1\n", target);
+    asm
+}
+
+fn process_or_inst(
+    bin: &Binary,
+    dfg: &DataFlowGraph,
+    reg_alloc: &LinearScanAlloc,
+    target: String,
+) -> String {
+    let mut asm: String = String::new();
+    let s = load_temp_int(bin, dfg, reg_alloc);
+    asm += &s[0].as_ref().unwrap();
+    let leftreg = s[1].as_ref().unwrap();
+    let rightreg = s[2].as_ref().unwrap();
+    // Logical OR: (lhs != 0) || (rhs != 0)
+    asm += &format!("\tsnez\tt0, {}\n", leftreg);
+    asm += &format!("\tsnez\tt1, {}\n", rightreg);
+    asm += &format!("\tor\t{}, t0, t1\n", target);
+    asm
+}
+
+fn process_inst(
+    bin: &Binary,
+    dfg: &DataFlowGraph,
+    reg_alloc: &LinearScanAlloc,
+    target: String,
+    inst: &str,
+) -> String {
+    let mut asm: String = String::new();
+    let s = load_temp_int(bin, dfg, reg_alloc);
+    asm += &s[0].as_ref().unwrap();
+    let leftreg = s[1].as_ref().unwrap();
+    let rightreg = s[2].as_ref().unwrap();
+
+    asm += &format!("\t{}\t{}, {}, {}\n", inst, target, leftreg, rightreg);
     asm
 }
 

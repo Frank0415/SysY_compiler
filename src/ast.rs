@@ -38,7 +38,7 @@ pub struct FuncFParam {
 #[derive(PartialEq)]
 pub enum Stmt {
     Return(Exp), // 语句类型之一：返回语句
-                 // 后续扩展：Declare, Assign, If, While 等
+    // 后续扩展：Declare, Assign, If, While 等
 }
 
 #[derive(Debug, PartialEq)]
@@ -73,6 +73,14 @@ pub enum BinaryOp {
     Mul,
     Div,
     Mod,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    Eq,
+    Neq,
+    Land,
+    Lor,
 }
 
 #[derive(PartialEq)]
