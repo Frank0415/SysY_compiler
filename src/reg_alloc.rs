@@ -1,7 +1,6 @@
-use koopa::ir::dfg::DataFlowGraph;
-use koopa::ir::{BasicBlock, Function, FunctionData, Value, ValueKind};
+use koopa::ir::{FunctionData, Value, ValueKind};
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, VecDeque};
+use std::collections::{BinaryHeap, HashMap};
 use std::option::Option;
 
 /// 活跃区间：值从定义（start）到最后使用（end）的区间

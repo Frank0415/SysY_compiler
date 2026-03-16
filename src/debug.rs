@@ -29,6 +29,14 @@ impl Debug for BinaryOp {
             BinaryOp::Mul => write!(f, "*"),
             BinaryOp::Div => write!(f, "/"),
             BinaryOp::Mod => write!(f, "%"),
+            BinaryOp::Lt => write!(f, "<"),
+            BinaryOp::Gt => write!(f, ">"),
+            BinaryOp::Le => write!(f, "<="),
+            BinaryOp::Ge => write!(f, ">="),
+            BinaryOp::Eq => write!(f, "=="),
+            BinaryOp::Neq => write!(f, "!="),
+            BinaryOp::Land => write!(f, "&&"),
+            BinaryOp::Lor => write!(f, "||"),
         }
     }
 }
