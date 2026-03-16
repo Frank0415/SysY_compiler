@@ -1,6 +1,6 @@
+use compiler::gen_asm::GenAsm;
 use compiler::gen_ir::{gen_ir, gen_text_ir};
 use compiler::sysy;
-use compiler::gen_asm::GenAsm;
 
 use std::env::args;
 use std::fs::{read_to_string, write};
@@ -11,7 +11,7 @@ fn main() -> Result<()> {
     // 解析命令行参数
     let mut args = args();
     args.next();
-    let _mode = args.next().expect("Expected mode (e.g., -koopa)");
+    let mode = args.next().expect("Expected mode (e.g., -koopa)");
     let input = args.next().expect("Expected input file");
     args.next(); // Skip -o
     let output = args.next().expect("Expected output file");
@@ -36,7 +36,12 @@ fn main() -> Result<()> {
     let text_form_ir = gen_text_ir(&program);
     println!("{}", text_form_ir);
     let asm = program.gen_asm().unwrap();
-    write(output, asm)?;
+    println!("{}", asm);
+    if mode == "-riscv" {
+        write(output, asm)?;
+    } else if mode == "-koopa" {
+        write(output, text_form_ir)?;
+    }
 
     Ok(())
 }
