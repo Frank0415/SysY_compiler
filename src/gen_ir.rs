@@ -100,18 +100,15 @@ impl ProcessIr for Exp {
                     }
                 }
             }
-            Exp::Binary {
-                op,
-                lhs,
-                rhs,
-            } => match op {
+            Exp::Binary { op, lhs, rhs } => match op {
                 crate::ast::BinaryOp::Land => {
                     let lhs_val = lhs.process_to_ir(func_data, bb);
                     let zero = func_data.dfg_mut().new_value().integer(0);
-                    let lhs_bool = func_data
-                        .dfg_mut()
-                        .new_value()
-                        .binary(BinaryOp::NotEq, lhs_val, zero);
+                    let lhs_bool =
+                        func_data
+                            .dfg_mut()
+                            .new_value()
+                            .binary(BinaryOp::NotEq, lhs_val, zero);
                     func_data
                         .layout_mut()
                         .bb_mut(bb)
@@ -120,10 +117,11 @@ impl ProcessIr for Exp {
                         .unwrap();
 
                     let rhs_val = rhs.process_to_ir(func_data, bb);
-                    let rhs_bool = func_data
-                        .dfg_mut()
-                        .new_value()
-                        .binary(BinaryOp::NotEq, rhs_val, zero);
+                    let rhs_bool =
+                        func_data
+                            .dfg_mut()
+                            .new_value()
+                            .binary(BinaryOp::NotEq, rhs_val, zero);
                     func_data
                         .layout_mut()
                         .bb_mut(bb)
@@ -131,10 +129,11 @@ impl ProcessIr for Exp {
                         .push_key_back(rhs_bool)
                         .unwrap();
 
-                    let res = func_data
-                        .dfg_mut()
-                        .new_value()
-                        .binary(BinaryOp::And, lhs_bool, rhs_bool);
+                    let res =
+                        func_data
+                            .dfg_mut()
+                            .new_value()
+                            .binary(BinaryOp::And, lhs_bool, rhs_bool);
                     func_data
                         .layout_mut()
                         .bb_mut(bb)
@@ -146,10 +145,11 @@ impl ProcessIr for Exp {
                 crate::ast::BinaryOp::Lor => {
                     let lhs_val = lhs.process_to_ir(func_data, bb);
                     let zero = func_data.dfg_mut().new_value().integer(0);
-                    let lhs_bool = func_data
-                        .dfg_mut()
-                        .new_value()
-                        .binary(BinaryOp::NotEq, lhs_val, zero);
+                    let lhs_bool =
+                        func_data
+                            .dfg_mut()
+                            .new_value()
+                            .binary(BinaryOp::NotEq, lhs_val, zero);
                     func_data
                         .layout_mut()
                         .bb_mut(bb)
@@ -158,10 +158,11 @@ impl ProcessIr for Exp {
                         .unwrap();
 
                     let rhs_val = rhs.process_to_ir(func_data, bb);
-                    let rhs_bool = func_data
-                        .dfg_mut()
-                        .new_value()
-                        .binary(BinaryOp::NotEq, rhs_val, zero);
+                    let rhs_bool =
+                        func_data
+                            .dfg_mut()
+                            .new_value()
+                            .binary(BinaryOp::NotEq, rhs_val, zero);
                     func_data
                         .layout_mut()
                         .bb_mut(bb)
@@ -169,10 +170,11 @@ impl ProcessIr for Exp {
                         .push_key_back(rhs_bool)
                         .unwrap();
 
-                    let res = func_data
-                        .dfg_mut()
-                        .new_value()
-                        .binary(BinaryOp::Or, lhs_bool, rhs_bool);
+                    let res =
+                        func_data
+                            .dfg_mut()
+                            .new_value()
+                            .binary(BinaryOp::Or, lhs_bool, rhs_bool);
                     func_data
                         .layout_mut()
                         .bb_mut(bb)
