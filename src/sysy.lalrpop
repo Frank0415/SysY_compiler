@@ -30,7 +30,32 @@ RawType: RawType = "int" => RawType::Int;
 Block: Block = "{" <stmt: StmtList> "}" => Block { stmt };
 StmtList = <Stmt*>;
 Stmt: Stmt = "return" <exp: Exp> ";" => Stmt::Return(exp);
-Exp: Exp = <AddExp>;
+
+Exp: Exp = <LOrExp>;
+
+LOrExp: Exp = {
+    <lhs: LOrExp> "||" <rhs: LAndExp> => Exp::Binary { op: BinaryOp::Lor, lhs: Box::new(lhs), rhs: Box::new(rhs) },
+    <exp: LAndExp> => exp,
+}
+
+LAndExp: Exp = {
+    <lhs: LAndExp> "&&" <rhs: EqExp> => Exp::Binary { op: BinaryOp::Land, lhs: Box::new(lhs), rhs: Box::new(rhs) },
+    <exp: EqExp> => exp,
+}
+
+EqExp: Exp = {
+    <lhs: EqExp> "==" <rhs: RelExp> => Exp::Binary { op: BinaryOp::Eq, lhs: Box::new(lhs), rhs: Box::new(rhs) },
+    <lhs: EqExp> "!=" <rhs: RelExp> => Exp::Binary { op: BinaryOp::Neq, lhs: Box::new(lhs), rhs: Box::new(rhs) },
+    <exp: RelExp> => exp,
+}
+
+RelExp: Exp = {
+    <lhs: RelExp> "<" <rhs: AddExp> => Exp::Binary { op: BinaryOp::Lt, lhs: Box::new(lhs), rhs: Box::new(rhs) },
+    <lhs: RelExp> ">" <rhs: AddExp> => Exp::Binary { op: BinaryOp::Gt, lhs: Box::new(lhs), rhs: Box::new(rhs) },
+    <lhs: RelExp> "<=" <rhs: AddExp> => Exp::Binary { op: BinaryOp::Le, lhs: Box::new(lhs), rhs: Box::new(rhs) },
+    <lhs: RelExp> ">=" <rhs: AddExp> => Exp::Binary { op: BinaryOp::Ge, lhs: Box::new(lhs), rhs: Box::new(rhs) },
+    <exp: AddExp> => exp,
+}
 
 AddExp: Exp = {
   <lhs: AddExp> "+" <rhs: MulExp> => Exp::Binary { op: BinaryOp::Add, lhs: Box::new(lhs), rhs: Box::new(rhs) },
