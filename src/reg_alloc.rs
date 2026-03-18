@@ -121,7 +121,7 @@ impl LinearScanAlloc {
             println!("Live interval for value {:?}: {:?}", k, live_interval);
             liveint.push(live_interval); // 记得把构建好的 interval 存入 Vec
         }
-        return liveint; // 返回填充好的 Vec
+        liveint // 返回填充好的 Vec
     }
 
     pub fn allocate(&mut self, func: &FunctionData) {

@@ -70,6 +70,7 @@ fn process_block(block: Block, func_data: &mut FunctionData, bb: BasicBlock, var
             }
             BlockItem::Decl(Decl::Const(decl)) => {
                 let typ = decl.typ;
+                assert!(typ != RawType::Void, "Cannot declare void constant");
                 for def in decl.defs {
                     let id = def.ident;
                     let val = def.init_val.exp.eval_exp(var_map);
@@ -83,6 +84,6 @@ fn process_block(block: Block, func_data: &mut FunctionData, bb: BasicBlock, var
 fn type_to_ir(typ: RawType) -> Type {
     match typ {
         RawType::Int => Type::get_i32(),
-        RawType::Null => Type::get_unit(),
+        RawType::Void => Type::get_unit(),
     }
 }

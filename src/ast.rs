@@ -10,6 +10,7 @@
  */
 use crate::gen_ir_variables::Variables;
 use std::boxed::Box;
+use clap::builder::Str;
 
 #[derive(PartialEq)]
 pub struct CompUnit {
@@ -27,12 +28,7 @@ pub struct FuncDef {
 #[derive(PartialEq)]
 pub enum RawType {
     Int,
-    Null,
-}
-
-#[derive(PartialEq)]
-pub enum BType {
-    Int,
+    Void,
 }
 
 #[derive(PartialEq)]
@@ -100,14 +96,16 @@ pub struct Block {
     pub stmt: Vec<BlockItem>,
 }
 
+// Const Defs
 #[derive(PartialEq)]
 pub enum Decl {
     Const(ConstDecl),
+    Var(VarDecl),
 }
 
 #[derive(PartialEq)]
 pub struct ConstDecl {
-    pub typ: BType,
+    pub typ: RawType,
     pub defs: Vec<ConstDef>,
 }
 #[derive(PartialEq)]
@@ -117,6 +115,26 @@ pub struct ConstDef {
 }
 #[derive(PartialEq)]
 pub struct ConstExp {
+    pub exp: Exp,
+}
+// Variable Exps
+#[derive(PartialEq)]
+pub struct VarDecl {
+    pub typ: RawType,
+    pub defs: Vec<VarDef>,
+}
+#[derive(PartialEq)]
+pub enum  VarDef{
+    Def(VarHasDef),
+    Nodef(String),
+}
+#[derive(PartialEq)]
+pub struct VarHasDef {
+    pub ident: String,
+    pub init_val: VarExp,
+}
+#[derive(PartialEq)]
+pub struct VarExp {
     pub exp: Exp,
 }
 

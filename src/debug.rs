@@ -75,6 +75,7 @@ impl Debug for Decl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Decl::Const(decl) => write!(f, "{:?}", decl),
+            Decl::Var(decl) => write!(f, "{:?}", decl),
         }
     }
 }
@@ -97,11 +98,24 @@ impl Debug for ConstExp {
     }
 }
 
-impl Debug for BType {
+impl Debug for VarDecl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Var {:?} {:?}", self.typ, self.defs)
+    }
+}
+
+impl Debug for VarDef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BType::Int => write!(f, "int"),
+            VarDef::Def(def) => write!(f, "{}: {:?}", def.ident, def.init_val),
+            VarDef::Nodef(str) => write!(f, "{:?}", str),
         }
+    }
+}
+
+impl Debug for VarExp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.exp)
     }
 }
 
@@ -109,7 +123,7 @@ impl Debug for RawType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RawType::Int => write!(f, "int"),
-            RawType::Null => write!(f, "void"),
+            RawType::Void => write!(f, "void"),
         }
     }
 }

@@ -41,7 +41,7 @@ fn process_to_ir_variable(
     if let Some(val) = var_map.get_const(var) {
         return func_data.dfg_mut().new_value().integer(val);
     }
-    
+
     // 2. 如果不是常量，再作为变量获取 (当前的 get 方法只返回 Var 类型的 Value)
     var_map.get(var).expect(&format!("Undefined variable or constant: {}", var))
 }
