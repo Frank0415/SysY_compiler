@@ -1,11 +1,13 @@
 use compiler::gen_asm::GenAsm;
-use compiler::gen_ir::{gen_ir, gen_text_ir};
+use compiler::gen_ir::{gen_ir};
 use compiler::sysy;
 
 use std::env::args;
 use std::fs::{read_to_string, write};
 use std::io::Result;
 use std::process::exit;
+use koopa::back::KoopaGenerator;
+use koopa::ir::Program;
 
 fn main() -> Result<()> {
     // 解析命令行参数
@@ -45,3 +47,10 @@ fn main() -> Result<()> {
 
     Ok(())
 }
+
+pub fn gen_text_ir(ir: &Program) -> String {
+    let mut g = KoopaGenerator::new(Vec::new());
+    g.generate_on(ir).unwrap();
+    std::str::from_utf8(&g.writer()).unwrap().to_string()
+}
+

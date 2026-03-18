@@ -5,6 +5,7 @@ impl Debug for Exp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Exp::Number(n) => write!(f, "{}", n),
+            Exp::Var(s) => write!(f, "{}", s),
             Exp::Unary { op, exp } => write!(f, "({:?} {:?})", op, exp),
             Exp::Binary { op, lhs, rhs } => write!(f, "({:?} {:?} {:?})", lhs, op, rhs),
         }
@@ -52,13 +53,86 @@ impl Debug for Stmt {
 impl Debug for Block {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut res = String::new();
-        res += "Vec<Stmt>:[\n";
-        let mut num = 0;
-        for stmt in &self.stmt {
-            res += &format!("  stmt#{}: {:?}\n", num, stmt);
-            num += 1;
+        res += "Vec<BlockItem>:[\n";
+        for (num, item) in self.stmt.iter().enumerate() {
+            res += &format!("  item#{}: {:?}\n", num, item);
         }
         res += "]";
         write!(f, "{}", res)
+    }
+}
+
+impl Debug for BlockItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BlockItem::Decl(decl) => write!(f, "Decl: {:?}", decl),
+            BlockItem::Stmt(stmt) => write!(f, "Stmt: {:?}", stmt),
+        }
+    }
+}
+
+impl Debug for Decl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Decl::Const(decl) => write!(f, "{:?}", decl),
+        }
+    }
+}
+
+impl Debug for ConstDecl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "const {:?} {:?}", self.typ, self.defs)
+    }
+}
+
+impl Debug for ConstDef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {:?}", self.ident, self.init_val)
+    }
+}
+
+impl Debug for ConstExp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.exp)
+    }
+}
+
+impl Debug for BType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BType::Int => write!(f, "int"),
+        }
+    }
+}
+
+impl Debug for RawType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RawType::Int => write!(f, "int"),
+            RawType::Null => write!(f, "void"),
+        }
+    }
+}
+
+impl Debug for CompUnit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CompUnit {{ {:?} }}", self.func_def)
+    }
+}
+
+impl Debug for FuncDef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FuncDef")
+            .field("func_type", &self.func_type)
+            .field("ident", &self.ident)
+            .field("func_params", &self.func_params)
+            .field("block", &self.block)
+            .finish()
+    }
+}
+
+impl Debug for FuncFParam {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?} {}", self.bt, self.id)
     }
 }

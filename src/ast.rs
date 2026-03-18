@@ -8,14 +8,15 @@
  * RawType instead of Type here:
  * is to prevent confusion from koopa::ir::Type
  */
+use crate::gen_ir_variables::Variables;
 use std::boxed::Box;
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub struct CompUnit {
     pub func_def: FuncDef,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub struct FuncDef {
     pub func_type: RawType,
     pub ident: String,
@@ -23,13 +24,18 @@ pub struct FuncDef {
     pub block: Block,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub enum RawType {
     Int,
     Null,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
+pub enum BType {
+    Int,
+}
+
+#[derive(PartialEq)]
 pub struct FuncFParam {
     pub bt: RawType,
     pub id: String,
@@ -38,7 +44,7 @@ pub struct FuncFParam {
 #[derive(PartialEq)]
 pub enum Stmt {
     Return(Exp), // 语句类型之一：返回语句
-    // 后续扩展：Declare, Assign, If, While 等
+                 // 后续扩展：Declare, Assign, If, While 等
 }
 
 #[derive(Debug, PartialEq)]
@@ -47,7 +53,7 @@ pub enum UnaryExp {}
 #[derive(PartialEq)]
 pub enum Exp {
     Number(i32),
-
+    Var(String), // 变量/常量引用
     Unary {
         op: UnaryOp,
         exp: Box<Exp>,
@@ -84,6 +90,127 @@ pub enum BinaryOp {
 }
 
 #[derive(PartialEq)]
-pub struct Block {
-    pub stmt: Vec<Stmt>,
+pub enum BlockItem {
+    Decl(Decl),
+    Stmt(Stmt),
 }
+
+#[derive(PartialEq)]
+pub struct Block {
+    pub stmt: Vec<BlockItem>,
+}
+
+#[derive(PartialEq)]
+pub enum Decl {
+    Const(ConstDecl),
+}
+
+#[derive(PartialEq)]
+pub struct ConstDecl {
+    pub typ: BType,
+    pub defs: Vec<ConstDef>,
+}
+#[derive(PartialEq)]
+pub struct ConstDef {
+    pub ident: String,
+    pub init_val: ConstExp,
+}
+#[derive(PartialEq)]
+pub struct ConstExp {
+    pub exp: Exp,
+}
+
+pub trait EvalExp {
+    fn eval_exp(&self, var_map: &Variables) -> i32;
+}
+
+impl EvalExp for Exp {
+    fn eval_exp(&self, var_map: &Variables) -> i32 {
+        match self {
+            Exp::Number(n) => *n,
+            Exp::Unary { op, exp } => {
+                let val = exp.eval_exp(var_map);
+                match op {
+                    UnaryOp::Minus => -val,
+                    UnaryOp::Not => {
+                        if val == 0 {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    _ => val,
+                }
+            }
+            Exp::Var(name) => var_map.get_const(name).expect("Undefined constant"),
+            Exp::Binary { op, lhs, rhs } => {
+                let l = lhs.eval_exp(var_map);
+                let r = rhs.eval_exp(var_map);
+                match op {
+                    BinaryOp::Add => l + r,
+                    BinaryOp::Sub => l - r,
+                    BinaryOp::Mul => l * r,
+                    BinaryOp::Div => l / r,
+                    BinaryOp::Mod => l % r,
+                    BinaryOp::Lt => {
+                        if l < r {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    BinaryOp::Gt => {
+                        if l > r {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    BinaryOp::Le => {
+                        if l <= r {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    BinaryOp::Ge => {
+                        if l >= r {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    BinaryOp::Eq => {
+                        if l == r {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    BinaryOp::Neq => {
+                        if l != r {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    BinaryOp::Land => {
+                        if l != 0 && r != 0 {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                    BinaryOp::Lor => {
+                        if l != 0 || r != 0 {
+                            1
+                        } else {
+                            0
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
