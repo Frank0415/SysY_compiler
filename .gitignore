@@ -111,3 +111,5 @@ http-client.private.env.json
 
 /target
 
+hello.koopa
+run.sh
