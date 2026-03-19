@@ -73,12 +73,8 @@ impl LocalGenAsm for ValueData {
                         }
                         ValueKind::Binary(_) => {
                             // 处理二元操作返回值
-                            res += &format!(
-                                "\tmv a0, {}\n",
-                                reg_alloc
-                                    .get_reg(v)
-                                    .expect("Please implement stack feature")
-                            ); // 假设结果在 t5 寄存器中
+                            res += &format!("\tmv a0, {}\n", reg_alloc.get_reg(v).expect("Please implement stack feature")
+                            );
                         }
                         _ => unreachable!(),
                     }
@@ -114,7 +110,12 @@ impl LocalGenAsm for ValueData {
                     ),
                 }
             }
-            _ => unreachable!(),
+            // ValueKind::Alloc(alloc) => {
+            //     let ret: String;
+            // }
+            // ValueKind::Load(load) => {}
+            // ValueKind::Store(store) => {}
+            _ => unimplemented!(),
         }
     }
 }
