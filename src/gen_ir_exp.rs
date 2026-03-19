@@ -33,13 +33,19 @@ impl ProcessIr for Exp {
 
 fn process_to_ir_variable(
     func_data: &mut FunctionData,
-    _bb: BasicBlock,
+    bb: BasicBlock,
     var: &String,
     var_map: &mut Variables,
 ) -> Value {
     // 1. 尝试作为常量获取
     if let Some(val) = var_map.get_const(var) {
         return func_data.dfg_mut().new_value().integer(val);
+    }
+    if let Some(var) = var_map.get(var) {
+        // 生成 load 指令从内存读取值
+        let load_inst = func_data.dfg_mut().new_value().load(var);
+        func_data.layout_mut().bb_mut(bb).insts_mut().push_key_back(load_inst).unwrap();
+        return load_inst;
     }
 
     // 2. 如果不是常量，再作为变量获取 (当前的 get 方法只返回 Var 类型的 Value)

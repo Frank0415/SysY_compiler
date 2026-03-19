@@ -39,6 +39,7 @@ pub struct FuncFParam {
 
 #[derive(PartialEq)]
 pub enum Stmt {
+    Assign { lval: String, exp: Exp },
     Return(Exp), // 语句类型之一：返回语句
                  // 后续扩展：Declare, Assign, If, While 等
 }
@@ -124,15 +125,15 @@ pub struct VarDecl {
     pub defs: Vec<VarDef>,
 }
 #[derive(PartialEq)]
-pub enum  VarDef{
-    Def(VarHasDef),
-    Nodef(String),
-}
-#[derive(PartialEq)]
-pub struct VarHasDef {
+pub struct  VarDef{
     pub ident: String,
-    pub init_val: VarExp,
+    pub init_val: Option<VarExp>,
 }
+// #[derive(PartialEq)]
+// pub struct VarHasDef {
+//     pub ident: String,
+//     pub init_val: VarExp,
+// }
 #[derive(PartialEq)]
 pub struct VarExp {
     pub exp: Exp,

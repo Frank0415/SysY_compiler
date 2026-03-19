@@ -45,6 +45,9 @@ impl Debug for BinaryOp {
 impl Debug for Stmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Stmt::Assign {lval, exp } => {
+                write!(f, "{} = {:?};", lval, exp)
+            },
             Stmt::Return(exp) => write!(f, "return {:?};", exp),
         }
     }
@@ -106,9 +109,9 @@ impl Debug for VarDecl {
 
 impl Debug for VarDef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            VarDef::Def(def) => write!(f, "{}: {:?}", def.ident, def.init_val),
-            VarDef::Nodef(str) => write!(f, "{:?}", str),
+        match &self.init_val {
+            None => write!(f, "{}, no evaluation!", self.ident),
+            Some(varexp) => write!(f, "{} = {:?}", self.ident, varexp),
         }
     }
 }

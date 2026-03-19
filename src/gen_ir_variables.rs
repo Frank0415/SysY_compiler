@@ -6,6 +6,7 @@ use std::collections::HashMap;
 pub enum SymbolInfo {
     Const(i32),
     Var(Value),
+    None,
 }
 
 pub struct Variables {
