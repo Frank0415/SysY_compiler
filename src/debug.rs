@@ -45,10 +45,12 @@ impl Debug for BinaryOp {
 impl Debug for Stmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Stmt::Assign {lval, exp } => {
-                write!(f, "{} = {:?};", lval, exp)
-            },
-            Stmt::Return(exp) => write!(f, "return {:?};", exp),
+            Stmt::Block(block) => write!(f, "{{ {:?} }}", block),
+            Stmt::Assign { lval, exp } => write!(f, "{} = {:?};", lval, exp),
+            Stmt::Exp(Some(exp)) => write!(f, "{:?};", exp),
+            Stmt::Exp(None) => write!(f, ";"),
+            Stmt::Return(Some(exp)) => write!(f, "return {:?};", exp),
+            Stmt::Return(None) => write!(f, "return;"),
         }
     }
 }

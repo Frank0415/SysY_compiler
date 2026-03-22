@@ -118,7 +118,7 @@ impl LocalGenAsm for ValueData {
                     }
                 }
             }
-            ValueKind::Alloc(alloc) => process_alloc_inst(),
+            ValueKind::Alloc(_alloc) => process_alloc_inst(),
             ValueKind::Load(load) => process_load_inst(load, value, dfg, reg_alloc),
             ValueKind::Store(store) => process_store_inst(store, dfg, reg_alloc),
             _ => unimplemented!(),
