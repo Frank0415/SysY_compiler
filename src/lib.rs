@@ -6,6 +6,7 @@ pub mod gen_ir;
 mod reg_alloc;
 mod gen_ir_variables;
 mod gen_ir_exp;
+mod gen_asm_exp;
 
 use lalrpop_util::lalrpop_mod;
 
