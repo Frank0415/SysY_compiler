@@ -2,6 +2,7 @@ use koopa::ir::{FunctionData, Value, ValueKind};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::option::Option;
+use crate::ast::EvalExp;
 
 /// 活跃区间：值从定义（start）到最后使用（end）的区间
 #[derive(Debug, Clone)]
@@ -44,21 +45,26 @@ pub struct LinearScanAlloc {
     // 已分配：Value -> 物理寄存器
     allocation: HashMap<Value, String>,
     // Spill 到栈的映射：Value -> 栈偏移
-    stack_slots: HashMap<Value, i32>,
-    next_stack_slot: i32,
+    stack_slots: HashMap<Value, usize>,
+    stack_count: usize,
     // 预留的临时寄存器（给 CodeGen 用，不参与分配）
     scratch_regs: Vec<String>,
+}
+
+struct op_results {
+    reg: Vec<Value>,
+    stack: Vec<Value>,
 }
 
 impl LinearScanAlloc {
     pub fn new() -> Self {
         LinearScanAlloc {
             free_regs: vec![
-                "t0".to_string(),
-                "t1".to_string(),
-                "t2".to_string(),
-                "t3".to_string(),
-                "t4".to_string(),
+                // "t0".to_string(),
+                // "t1".to_string(),
+                // "t2".to_string(),
+                // "t3".to_string(),
+                // "t4".to_string(),
                 "a0".to_string(),
                 "a1".to_string(),
                 "a2".to_string(),
@@ -70,15 +76,17 @@ impl LinearScanAlloc {
             ],
             allocation: HashMap::new(),
             stack_slots: HashMap::new(),
-            next_stack_slot: 0,
+            stack_count: 0,
             scratch_regs: vec!["t5".to_string(), "t6".to_string()], // 预留 s0, s1 给 CodeGen
         }
     }
 
-    fn build_intervals(&self, func: &FunctionData) -> Vec<LiveInterval> {
+    fn build_intervals(&self, func: &FunctionData) -> (Vec<LiveInterval>, HashMap<Value, usize>) {
         let dfg = func.dfg();
         let mut start: HashMap<Value, usize> = HashMap::new();
         let mut end: HashMap<Value, usize> = HashMap::new();
+        let mut stack_start: HashMap<Value, usize> = HashMap::new();
+        let mut stack_end: HashMap<Value, usize> = HashMap::new();
         let mut program_point = 0usize;
         // 按布局顺序遍历基本块
         for (bb, node) in func.layout().bbs() {
@@ -92,19 +100,28 @@ impl LinearScanAlloc {
             // 遍历指令
             for &inst in node.insts().keys() {
                 let value_data = dfg.value(inst);
-
+                // println!("Value: {:?}, Inst: {:?}", value_data, inst);
                 // 记录定义点
                 // 排除没有结果的指令（如 branch, jump, store）
                 if self.has_result(value_data) {
-                    start.insert(inst, program_point);
+                    if self.is_alloc(value_data) {
+                        stack_start.insert(inst, program_point);
+                    } else {
+                        start.insert(inst, program_point);
+                    }
                 }
 
                 // 更新操作数的最后使用点
-                for operand in self.get_operands(value_data) {
+                let op_res = self.get_operands(value_data, &inst);
+                for register in op_res.reg {
+                    // println!("Operand: {:?}", register);
                     // 只有当操作数不是立即数（Integer）时，才需要分配寄存器/记录活跃区间
-                    if !matches!(dfg.value(operand).kind(), ValueKind::Integer(_)) {
-                        end.insert(operand, program_point);
+                    if !matches!(dfg.value(register).kind(), ValueKind::Integer(_)) {
+                        end.insert(register, program_point);
                     }
+                }
+                for stack in op_res.stack {
+                    stack_end.insert(stack, program_point);
                 }
 
                 program_point += 1;
@@ -121,13 +138,14 @@ impl LinearScanAlloc {
             println!("Live interval for value {:?}: {:?}", k, live_interval);
             liveint.push(live_interval); // 记得把构建好的 interval 存入 Vec
         }
-        liveint // 返回填充好的 Vec
+        (liveint, stack_start) // 返回填充好的 Vec
     }
 
     pub fn allocate(&mut self, func: &FunctionData) {
-        let mut intervals = self.build_intervals(func);
+        let (mut intervals, stack_maps) = self.build_intervals(func);
         intervals.sort_by_key(|i| i.start); // 按 start 升序排序
         let mut active: BinaryHeap<ActiveInterval> = BinaryHeap::new();
+        let mut stack_slots: Vec<Value> = Vec::new();
 
         for current in intervals {
             println!(
@@ -159,36 +177,52 @@ impl LinearScanAlloc {
                     reg,
                 });
             } else {
-                // 3. 需要 spill：比较结束时间
-                let spill_candidate = active
-                    .peek()
-                    .expect("Active set should not be empty if no free regs");
-                if spill_candidate.end > current.end {
-                    // 驱逐结束最晚的，给当前用
-                    let spilled = active.pop().unwrap();
-                    println!(
-                        "  Spilling value {:?} (end: {}) to free register {}",
-                        spilled.value, spilled.end, spilled.reg
-                    );
-                    self.allocation.remove(&spilled.value);
-                    self.spill_value(spilled.value);
-
-                    println!(
-                        "  Assigned stolen register {} to value {:?}",
-                        spilled.reg, current.value
-                    );
-                    self.allocation.insert(current.value, spilled.reg.clone());
-                    active.push(ActiveInterval {
-                        end: current.end,
-                        value: current.value,
-                        reg: spilled.reg,
-                    });
-                } else {
-                    // 当前结束更早，直接 spill 当前
-                    println!("  Spilling current value {:?} immediately", current.value);
-                    self.spill_value(current.value);
-                }
+                stack_slots.push(current.value);
+                println!("No free registers found, stack size {} assigned to value {:?}, ", stack_slots.len() * 4, current.value);
             }
+
+            // {
+            //     // 3. 需要 spill：比较结束时间
+            //     let spill_candidate = active
+            //         .peek()
+            //         .expect("Active set should not be empty if no free regs");
+            //     if spill_candidate.end > current.end {
+            //         // 驱逐结束最晚的，给当前用
+            //         let spilled = active.pop().unwrap();
+            //         println!(
+            //             "  Spilling value {:?} (end: {}) to free register {}",
+            //             spilled.value, spilled.end, spilled.reg
+            //         );
+            //         self.allocation.remove(&spilled.value);
+            //         self.spill_value(spilled.value);
+            //
+            //         println!(
+            //             "  Assigned stolen register {} to value {:?}",
+            //             spilled.reg, current.value
+            //         );
+            //         self.allocation.insert(current.value, spilled.reg.clone());
+            //         active.push(ActiveInterval {
+            //             end: current.end,
+            //             value: current.value,
+            //             reg: spilled.reg,
+            //         });
+            //     } else {
+            //         // 当前结束更早，直接 spill 当前
+            //         println!("  Spilling current value {:?} immediately", current.value);
+            //         self.spill_value(current.value);
+            //     }
+            // }
+        }
+
+        // 3.分配stack
+        for (stack, place) in stack_maps.iter() {
+            stack_slots.push(*stack);
+            println!("Assigned stack size {} assigned to value {:?}", stack_slots.len() * 4, stack);
+        }
+
+        self.stack_count = stack_slots.len() * 4;
+        for (idx, stack) in stack_slots.iter().enumerate() {
+            self.stack_slots.insert(*stack, self.stack_count - idx * 4);
         }
     }
 
@@ -198,19 +232,36 @@ impl LinearScanAlloc {
         !matches!(data.kind(), Branch(_) | Jump(_) | Store(_) | Return(_))
     }
 
-    fn get_operands(&self, data: &koopa::ir::entities::ValueData) -> Vec<Value> {
+    fn is_alloc(&self, data: &koopa::ir::entities::ValueData) -> bool {
         use koopa::ir::ValueKind::*;
-        match data.kind() {
-            Binary(bin) => vec![bin.lhs(), bin.rhs()],
-            Return(ret) => ret.value().map_or(vec![], |v| vec![v]),
-            _ => vec![],
-        }
+        matches!(data.kind(), Alloc(_))
     }
 
-    fn spill_value(&mut self, value: Value) {
-        self.stack_slots.insert(value, self.next_stack_slot);
-        self.next_stack_slot += 4; // 假设 4 字节
+    pub fn get_stack_count(&self) -> usize {
+        self.stack_count
     }
+
+    fn get_operands(&self, data: &koopa::ir::entities::ValueData, inst: &Value) -> op_results {
+        use koopa::ir::ValueKind::*;
+        let mut ret = op_results { reg: Vec::new(), stack: Vec::new() };
+        match data.kind() {
+            Binary(bin) => ret.reg = vec![bin.lhs(), bin.rhs()],
+            Return(retval) => ret.reg = retval.value().map_or(vec![], |v| vec![v]),
+            Alloc(_) => ret.stack = vec![*inst], // We suppose the memory of a variable is allocated when alloc, just like C
+            Load(load) => {
+                ret.reg = vec![*inst];
+                ret.stack = vec![load.src()];
+            }
+            // Store(store) => vec![store.dest(), store.value()],
+            _ => {}
+        }
+        ret
+    }
+
+    // fn spill_value(&mut self, value: Value) {
+    //     stack_slots.insert(value, self.next_stack_slot);
+    //     self.next_stack_slot += 4; // 假设 4 字节
+    // }
 
     /// 查询分配结果
     pub fn get_reg(&self, value: Value) -> Option<&String> {
@@ -219,9 +270,5 @@ impl LinearScanAlloc {
             value, self.allocation
         );
         self.allocation.get(&value)
-    }
-
-    pub fn get_stack_offset(&self, value: Value) -> Option<i32> {
-        self.stack_slots.get(&value).copied()
     }
 }

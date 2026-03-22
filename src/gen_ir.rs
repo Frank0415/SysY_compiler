@@ -100,9 +100,9 @@ fn process_block(
                 assert_ne!(typ, Type::get_unit(), "Cannot declare void variable");
                 for def in decl.defs {
                     let id = def.ident;
-                    assert_eq!(var_map.get(&id),None, "Should not declare a variable multiple times!");
+                    assert_eq!(var_map.get(&id), None, "Should not declare a variable multiple times!");
                     let alloc_ptr = func_data.dfg_mut().new_value().alloc(typ.clone());
-                    func_data.dfg_mut().set_value_name(alloc_ptr,Some(format!("@{}",id)));
+                    func_data.dfg_mut().set_value_name(alloc_ptr, Some(format!("@{}", id)));
                     func_data
                         .layout_mut()
                         .bb_mut(bb)
@@ -128,7 +128,6 @@ fn process_block(
             }
         }
     }
-
 }
 fn type_to_ir(typ: &RawType) -> Type {
     match typ {
