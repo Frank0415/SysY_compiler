@@ -9,8 +9,8 @@
  * is to prevent confusion from koopa::ir::Type
  */
 use crate::gen_ir_variables::Variables;
-use std::boxed::Box;
 use clap::builder::Str;
+use std::boxed::Box;
 
 #[derive(PartialEq)]
 pub struct CompUnit {
@@ -39,9 +39,10 @@ pub struct FuncFParam {
 
 #[derive(PartialEq)]
 pub enum Stmt {
+    Block(Block),
     Assign { lval: String, exp: Exp },
-    Return(Exp), // 语句类型之一：返回语句
-                 // 后续扩展：Declare, Assign, If, While 等
+    Exp(Option<Exp>),    // 新增：[Exp] ";" 语句（若为 None 则是单独的空分号 ";"）
+    Return(Option<Exp>), // 修改：将 Return(Exp) 改为返回 Option<Exp>，支持 "return;"
 }
 
 #[derive(Debug, PartialEq)]
@@ -125,7 +126,7 @@ pub struct VarDecl {
     pub defs: Vec<VarDef>,
 }
 #[derive(PartialEq)]
-pub struct  VarDef{
+pub struct VarDef {
     pub ident: String,
     pub init_val: Option<VarExp>,
 }
@@ -232,4 +233,3 @@ impl EvalExp for Exp {
         }
     }
 }
-

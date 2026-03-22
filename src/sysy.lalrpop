@@ -120,8 +120,10 @@ RawType: RawType = {
 
 // 语句：目前仅支持 return 表达式;
 Stmt: Stmt = {
-    "return" <exp: Exp> ";" => Stmt::Return(exp),
     <id: Ident> "=" <exp: Exp> ";" => Stmt::Assign { lval: id, exp },
+    <exp: Exp?> ";" => Stmt::Exp(exp),
+    <block: Block> => Stmt::Block(block),
+    "return" <exp: Exp?> ";" => Stmt::Return(exp),
 };
 
 // ============================================

@@ -82,14 +82,27 @@ fn process_block(
                 }
             }
             BlockItem::Stmt(Stmt::Return(exp)) => {
-                let ret_val = exp.process_to_ir(func_data, bb, var_map);
-                let ret_inst = func_data.dfg_mut().new_value().ret(Some(ret_val));
+                let mut ret_val: Option<Value> = None;
+                if let Some(expr) = exp {
+                    ret_val = Some(expr.process_to_ir(func_data, bb, var_map));
+                }
+                let ret_inst = func_data.dfg_mut().new_value().ret(ret_val);
                 func_data
                     .layout_mut()
                     .bb_mut(bb)
                     .insts_mut()
                     .push_key_back(ret_inst)
                     .unwrap();
+            }
+            BlockItem::Stmt(Stmt::Exp(exp)) => {
+                if let Some(expr) = exp {
+                    let _ = expr.process_to_ir(func_data, bb, var_map);
+                }
+            }
+            BlockItem::Stmt(Stmt::Block(blk)) => {
+                var_map.enter_scope();
+                process_block(blk, func_data, bb, var_map);
+                var_map.exit_scope();
             }
             BlockItem::Decl(Decl::Const(decl)) => {
                 let typ = type_to_ir(&decl.typ);
@@ -105,15 +118,15 @@ fn process_block(
                 assert_ne!(typ, Type::get_unit(), "Cannot declare void variable");
                 for def in decl.defs {
                     let id = def.ident;
-                    assert_eq!(
-                        var_map.get(&id),
-                        None,
-                        "Should not declare a variable multiple times!"
+                    assert!(
+                        !var_map.contains_in_current_scope(&id),
+                        "Should not declare a variable multiple times in the same scope!"
                     );
                     let alloc_ptr = func_data.dfg_mut().new_value().alloc(typ.clone());
-                    func_data
-                        .dfg_mut()
-                        .set_value_name(alloc_ptr, Some(format!("@{}", id)));
+                    func_data.dfg_mut().set_value_name(
+                        alloc_ptr,
+                        Some(format!("@{}_{}", id, var_map.get_scope_layer())),
+                    );
                     func_data
                         .layout_mut()
                         .bb_mut(bb)
@@ -137,6 +150,7 @@ fn process_block(
                     var_map.insert(id, SymbolInfo::Var(alloc_ptr));
                 }
             }
+            _ => unimplemented!(),
         }
     }
 }

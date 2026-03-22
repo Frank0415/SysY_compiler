@@ -33,6 +33,13 @@ impl Variables {
         }
     }
 
+    pub fn contains_in_current_scope(&self, name: &str) -> bool {
+        self.scopes
+            .last()
+            .and_then(|scope| scope.get(name))
+            .is_some()
+    }
+
     pub fn get_const(&self, name: &str) -> Option<i32> {
         // Search from most recent scope to oldest
         self.scopes
@@ -52,5 +59,9 @@ impl Variables {
                 Some(SymbolInfo::Var(val)) => Some(*val),
                 _ => None,
             })
+    }
+
+    pub fn get_scope_layer(&self) -> usize {
+        return self.scopes.len();
     }
 }
