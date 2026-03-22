@@ -71,7 +71,12 @@ fn process_block(
                 if let Some(dest) = var_map.get(&lval) {
                     // 3. 生成 store 指令：向指针写入值
                     let store_inst = func_data.dfg_mut().new_value().store(val, dest);
-                    func_data.layout_mut().bb_mut(bb).insts_mut().push_key_back(store_inst).unwrap();
+                    func_data
+                        .layout_mut()
+                        .bb_mut(bb)
+                        .insts_mut()
+                        .push_key_back(store_inst)
+                        .unwrap();
                 } else {
                     panic!("Undefined variable: {}", lval);
                 }
@@ -100,9 +105,15 @@ fn process_block(
                 assert_ne!(typ, Type::get_unit(), "Cannot declare void variable");
                 for def in decl.defs {
                     let id = def.ident;
-                    assert_eq!(var_map.get(&id), None, "Should not declare a variable multiple times!");
+                    assert_eq!(
+                        var_map.get(&id),
+                        None,
+                        "Should not declare a variable multiple times!"
+                    );
                     let alloc_ptr = func_data.dfg_mut().new_value().alloc(typ.clone());
-                    func_data.dfg_mut().set_value_name(alloc_ptr, Some(format!("@{}", id)));
+                    func_data
+                        .dfg_mut()
+                        .set_value_name(alloc_ptr, Some(format!("@{}", id)));
                     func_data
                         .layout_mut()
                         .bb_mut(bb)

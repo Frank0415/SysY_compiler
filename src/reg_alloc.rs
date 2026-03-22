@@ -264,11 +264,15 @@ impl LinearScanAlloc {
     // }
 
     /// 查询分配结果
-    pub fn get_reg(&self, value: Value) -> Option<&String> {
+    pub fn get_reg(&self, value: &Value) -> Option<&String> {
         println!(
             "Querying register for value {:?} in allocation: {:?}",
             value, self.allocation
         );
-        self.allocation.get(&value)
+        self.allocation.get(value)
+    }
+
+    pub fn get_stack(&self, value: &Value) -> Option<&usize> {
+        self.stack_slots.get(value)
     }
 }
