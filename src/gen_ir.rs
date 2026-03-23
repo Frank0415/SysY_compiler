@@ -1,9 +1,7 @@
-use crate::ast::{Block, BlockItem, CompUnit, EvalExp, Exp, FuncDef, FuncFParam, RawType, Stmt};
-use crate::ast::{Decl, UnaryOp};
+use crate::ast::{Block, BlockItem, CompUnit, EvalExp, FuncDef, FuncFParam, RawType, Stmt};
+use crate::ast::{Decl};
 use crate::gen_ir_exp::ProcessIr;
 use crate::gen_ir_variables::{SymbolInfo, Variables};
-use koopa::back::KoopaGenerator;
-use koopa::ir::builder::ValueInserter;
 use koopa::ir::{builder_traits::*, types::*, *};
 use std::fmt::Error;
 /*

@@ -1,5 +1,5 @@
 use crate::gen_asm_exp::*;
-use crate::reg_alloc::LinearScanAlloc;
+use crate::reg_alloc::{LinearScanAlloc, VariableLocation};
 use koopa::ir::ValueKind;
 use koopa::ir::dfg::DataFlowGraph;
 use koopa::ir::entities::ValueData;
@@ -76,12 +76,18 @@ impl LocalGenAsm for ValueData {
                 if let Some(v) = ret.value() {
                     if let ValueKind::Integer(int) = dfg.value(v).kind() {
                         res += &format!("\tli a0, {}\n", int.value());
-                    } else if let Some(reg) = reg_alloc.get_reg(&v) {
-                        res += &format!("\tmv a0, {}\n", reg);
-                    } else if let Some(stack_offset) = reg_alloc.get_stack(&v) {
-                        res += &format!("\tlw a0, {}(sp)\n", stack_offset);
                     } else {
-                        unreachable!("Return value not found in register or stack");
+                        match reg_alloc.get_variable(&v) {
+                            VariableLocation::Register(reg) => {
+                                res += &format!("\tmv a0, {}\n", reg);
+                            }
+                            VariableLocation::Stack(stack_offset) => {
+                                res += &format!("\tlw a0, {}(sp)\n", stack_offset);
+                            }
+                            VariableLocation::None => {
+                                unreachable!("Return value not found in register or stack");
+                            }
+                        }
                     }
                 }
                 let stack_size = reg_alloc.get_stack_count();
@@ -92,10 +98,10 @@ impl LocalGenAsm for ValueData {
                 res
             }
             ValueKind::Binary(bin) => {
-                let target = reg_alloc
-                    .get_reg(value)
-                    .expect("Please implement stack regs logic!")
-                    .clone();
+                let target = match reg_alloc.get_variable(value) {
+                    VariableLocation::Register(reg) => reg,
+                    _ => panic!("Please implement stack regs logic!"),
+                };
                 match bin.op() {
                     koopa::ir::BinaryOp::Add => process_inst(bin, dfg, reg_alloc, target, "add"),
                     koopa::ir::BinaryOp::Sub => process_inst(bin, dfg, reg_alloc, target, "sub"),

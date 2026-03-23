@@ -1,8 +1,6 @@
-use crate::ast::{Block, BlockItem, CompUnit, Exp, FuncDef, FuncFParam, RawType, Stmt};
+use crate::ast::{Exp};
 use crate::gen_ir_variables::Variables;
-use koopa::back::KoopaGenerator;
-use koopa::ir::{builder_traits::*, types::*, *};
-use std::fmt::Error;
+use koopa::ir::{builder_traits::*, *};
 
 pub trait ProcessIr {
     fn process_to_ir(

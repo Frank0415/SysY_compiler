@@ -1,8 +1,15 @@
 use koopa::ir::{FunctionData, Value, ValueKind};
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::option::Option;
-use crate::ast::EvalExp;
+
+#[derive(Debug, Clone)]
+pub enum VariableLocation {
+    Register(String),
+    Stack(usize),
+    None,
+}
 
 /// 活跃区间：值从定义（start）到最后使用（end）的区间
 #[derive(Debug, Clone)]
@@ -17,6 +24,7 @@ pub struct LiveInterval {
 #[derive(Debug, Clone)]
 pub struct ActiveInterval {
     end: usize,
+
     value: Value,
     reg: String,
 }
@@ -48,7 +56,7 @@ pub struct LinearScanAlloc {
     stack_slots: HashMap<Value, usize>,
     stack_count: usize,
     // 预留的临时寄存器（给 CodeGen 用，不参与分配）
-    scratch_regs: Vec<String>,
+    scratch_regs: RefCell<Vec<String>>,
 }
 
 struct op_results {
@@ -60,11 +68,6 @@ impl LinearScanAlloc {
     pub fn new() -> Self {
         LinearScanAlloc {
             free_regs: vec![
-                // "t0".to_string(),
-                // "t1".to_string(),
-                // "t2".to_string(),
-                // "t3".to_string(),
-                // "t4".to_string(),
                 "a0".to_string(),
                 "a1".to_string(),
                 "a2".to_string(),
@@ -77,7 +80,7 @@ impl LinearScanAlloc {
             allocation: HashMap::new(),
             stack_slots: HashMap::new(),
             stack_count: 0,
-            scratch_regs: vec!["t5".to_string(), "t6".to_string()], // 预留 s0, s1 给 CodeGen
+            scratch_regs: RefCell::new(vec!["t5".to_string(), "t6".to_string()]),
         }
     }
 
@@ -178,7 +181,11 @@ impl LinearScanAlloc {
                 });
             } else {
                 stack_slots.push(current.value);
-                println!("No free registers found, stack size {} assigned to value {:?}, ", stack_slots.len() * 4, current.value);
+                println!(
+                    "No free registers found, stack size {} assigned to value {:?}, ",
+                    stack_slots.len() * 4,
+                    current.value
+                );
             }
 
             // {
@@ -217,7 +224,11 @@ impl LinearScanAlloc {
         // 3.分配stack
         for (stack, place) in stack_maps.iter() {
             stack_slots.push(*stack);
-            println!("Assigned stack size {} assigned to value {:?}", stack_slots.len() * 4, stack);
+            println!(
+                "Assigned stack size {} assigned to value {:?}",
+                stack_slots.len() * 4,
+                stack
+            );
         }
 
         self.stack_count = stack_slots.len() * 4;
@@ -243,7 +254,10 @@ impl LinearScanAlloc {
 
     fn get_operands(&self, data: &koopa::ir::entities::ValueData, inst: &Value) -> op_results {
         use koopa::ir::ValueKind::*;
-        let mut ret = op_results { reg: Vec::new(), stack: Vec::new() };
+        let mut ret = op_results {
+            reg: Vec::new(),
+            stack: Vec::new(),
+        };
         match data.kind() {
             Binary(bin) => ret.reg = vec![bin.lhs(), bin.rhs()],
             Return(retval) => ret.reg = retval.value().map_or(vec![], |v| vec![v]),
@@ -263,20 +277,24 @@ impl LinearScanAlloc {
     //     self.next_stack_slot += 4; // 假设 4 字节
     // }
 
-    /// 查询分配结果
-    pub fn get_reg(&self, value: &Value) -> Option<&String> {
-        println!(
-            "Querying register for value {:?} in allocation: {:?}",
-            value, self.allocation
-        );
-        self.allocation.get(value)
+    pub fn acquire_scratch(&self) -> String {
+        self.scratch_regs
+            .borrow_mut()
+            .pop()
+            .expect("No scratch register available")
     }
 
-    pub fn get_stack(&self, value: &Value) -> Option<usize> {
-        if let Some(size) = self.stack_slots.get(value) {
-            Some(size - 4)
+    pub fn release_scratch(&self, reg: String) {
+        self.scratch_regs.borrow_mut().push(reg);
+    }
+
+    pub fn get_variable(&self, value: &Value) -> VariableLocation {
+        if let Some(reg) = self.allocation.get(value) {
+            VariableLocation::Register(reg.clone())
+        } else if let Some(size) = self.stack_slots.get(value) {
+            VariableLocation::Stack(size - 4)
         } else {
-            None
+            VariableLocation::None
         }
     }
 }
