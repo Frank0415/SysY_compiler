@@ -1,7 +1,7 @@
 use crate::reg_alloc::LinearScanAlloc;
 use koopa::ir::ValueKind;
 use koopa::ir::dfg::DataFlowGraph;
-use koopa::ir::values::{Alloc, Binary, Load, Store};
+use koopa::ir::values::{Alloc, Binary, Branch, Jump, Load, Store};
 
 // 先尝试使用教程的汇编，而不是使用更简便的形式
 pub fn process_eq_inst(
@@ -180,7 +180,7 @@ pub fn process_load_inst(
     let src = load.src();
     let src_offset = reg_alloc
         .get_stack(&src)
-        .expect("Source not found on stack") - 4;
+        .expect("Source not found on stack");
     let dest_reg = reg_alloc.get_reg(inst);
     let dest_stack = reg_alloc.get_stack(inst);
 
@@ -203,7 +203,7 @@ pub fn process_store_inst(
     let mut ret = String::new();
     let val = store.value();
     let dest = store.dest();
-    let dest_offset = reg_alloc.get_stack(&dest).expect("Dest not found on stack") - 4;
+    let dest_offset = reg_alloc.get_stack(&dest).expect("Dest not found on stack");
 
     if let koopa::ir::ValueKind::Integer(int) = dfg.value(val).kind() {
         let v = int.value();
@@ -223,4 +223,49 @@ pub fn process_store_inst(
     }
 
     ret
+}
+
+pub fn process_branch_inst(
+    branch: &Branch,
+    dfg: &DataFlowGraph,
+    reg_alloc: &LinearScanAlloc,
+) -> String {
+    let mut ret = String::new();
+    let cond = branch.cond();
+    let then_bb = branch.true_bb();
+    let else_bb = branch.false_bb();
+    let then_name = &dfg.bb(then_bb).name().as_ref().unwrap()[1..];
+    let else_name = &dfg.bb(else_bb).name().as_ref().unwrap()[1..];
+
+    // 1. Load the condition into a register (t0 if it's on stack)
+    let cond_reg = if let Some(reg) = reg_alloc.get_reg(&cond) {
+        reg.clone()
+    } else if let Some(offset) = reg_alloc.get_stack(&cond) {
+        ret += &format!("\tlw t0, {}(sp)\n", offset);
+        "t0".to_string()
+    } else {
+        panic!("Branch condition not found in register or stack");
+    };
+
+    // 2. Generate branch: if cond != 0 jump to then_name, else jump to else_name
+    ret += &format!("\tbnez {}, {}\n", cond_reg, then_name);
+    ret += &format!("\tj {}\n", else_name);
+
+
+    // ret += &format!("\tbr {}\n");
+
+    if let Some(reg) = reg_alloc.get_reg(&cond) {} else if let Some(stack) = reg_alloc.get_stack(&cond) {} else {
+        panic!("Branch condition has neither register nor stack slot");
+    }
+
+    ret
+}
+
+pub fn process_jump_inst(
+    jump: &Jump,
+    dfg: &DataFlowGraph,
+    reg_alloc: &LinearScanAlloc,
+) -> String {
+    let jump_target = &dfg.bb(jump.target()).name().as_ref().unwrap()[1..];
+    format!("\tj {}\n", jump_target)
 }

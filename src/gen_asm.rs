@@ -44,7 +44,12 @@ impl GenAsm for FunctionData {
         if stack_size > 0 {
             str += &format!("\taddi sp, sp, -{}\n", stack_size);
         }
-        for (&_bb, node) in self.layout().bbs() {
+        for (&bb, node) in self.layout().bbs() {
+            // Add the label for the basic block (skip %entry which is handled by function name)
+            let bb_name = &self.dfg().bb(bb).name().as_ref().unwrap()[1..];
+            if bb_name != "entry" {
+                str += &format!("{}:\n", bb_name);
+            }
             for &inst in node.insts().keys() {
                 str += &self
                     .dfg()
@@ -119,6 +124,8 @@ impl LocalGenAsm for ValueData {
             ValueKind::Alloc(_alloc) => process_alloc_inst(),
             ValueKind::Load(load) => process_load_inst(load, value, dfg, reg_alloc),
             ValueKind::Store(store) => process_store_inst(store, dfg, reg_alloc),
+            ValueKind::Branch(branch) => process_branch_inst(branch, dfg, reg_alloc),
+            ValueKind::Jump(jmp) => process_jump_inst(jmp, dfg, reg_alloc),
             _ => unimplemented!(),
         }
     }

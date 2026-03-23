@@ -59,7 +59,11 @@ impl Debug for Stmt {
 impl Debug for IF {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.else_stmt {
-            Some(else_stmt) => write!(f, "if: ({:?}) \n  {:?} \n  else: {:?}", self.cond, self.then_stmt, else_stmt),
+            Some(else_stmt) => write!(
+                f,
+                "if: ({:?}) \n  {:?} \n  else: {:?}",
+                self.cond, self.then_stmt, else_stmt
+            ),
             None => write!(f, "if ({:?}) {:?}", self.cond, self.then_stmt),
         }
     }

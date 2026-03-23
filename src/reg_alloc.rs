@@ -272,7 +272,11 @@ impl LinearScanAlloc {
         self.allocation.get(value)
     }
 
-    pub fn get_stack(&self, value: &Value) -> Option<&usize> {
-        self.stack_slots.get(value)
+    pub fn get_stack(&self, value: &Value) -> Option<usize> {
+        if let Some(size) = self.stack_slots.get(value) {
+            Some(size - 4)
+        } else {
+            None
+        }
     }
 }
