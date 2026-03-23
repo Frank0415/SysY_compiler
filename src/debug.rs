@@ -51,6 +51,16 @@ impl Debug for Stmt {
             Stmt::Exp(None) => write!(f, ";"),
             Stmt::Return(Some(exp)) => write!(f, "return {:?};", exp),
             Stmt::Return(None) => write!(f, "return;"),
+            Stmt::IF(if_block) => write!(f, "{:?}", *if_block),
+        }
+    }
+}
+
+impl Debug for IF {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.else_stmt {
+            Some(else_stmt) => write!(f, "if: ({:?}) \n  {:?} \n  else: {:?}", self.cond, self.then_stmt, else_stmt),
+            None => write!(f, "if ({:?}) {:?}", self.cond, self.then_stmt),
         }
     }
 }

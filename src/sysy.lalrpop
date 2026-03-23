@@ -120,10 +120,36 @@ RawType: RawType = {
 
 // 语句：目前仅支持 return 表达式;
 Stmt: Stmt = {
+    <stmt: MatchedStmt> => stmt,
+    <stmt: UnmatchedStmt> => stmt,
+};
+
+MatchedStmt: Stmt = {
     <id: Ident> "=" <exp: Exp> ";" => Stmt::Assign { lval: id, exp },
     <exp: Exp?> ";" => Stmt::Exp(exp),
     <block: Block> => Stmt::Block(block),
     "return" <exp: Exp?> ";" => Stmt::Return(exp),
+    "if" "(" <cond: Exp> ")" <base_if: MatchedStmt> "else" <else_if: MatchedStmt>
+        => Stmt::IF(Box::new(IF {
+            cond,
+            then_stmt:base_if,
+            else_stmt: Some(else_if),
+        })),
+};
+
+UnmatchedStmt: Stmt = {
+    "if" "(" <cond: Exp> ")" <base_if: Stmt>
+        => Stmt::IF(Box::new(IF {
+            cond,
+            then_stmt:base_if,
+            else_stmt: None,
+        })),
+    "if" "(" <cond: Exp> ")" <base_if: MatchedStmt> "else" <else_if: UnmatchedStmt>
+        => Stmt::IF(Box::new(IF {
+            cond,
+            then_stmt:base_if,
+            else_stmt: Some(else_if),
+        })),
 };
 
 // ============================================

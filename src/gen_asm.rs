@@ -3,7 +3,6 @@ use crate::reg_alloc::LinearScanAlloc;
 use koopa::ir::ValueKind;
 use koopa::ir::dfg::DataFlowGraph;
 use koopa::ir::entities::ValueData;
-use koopa::ir::values::Binary;
 use koopa::ir::{FunctionData, Program, Value};
 use std::fmt::Error;
 
@@ -88,8 +87,7 @@ impl LocalGenAsm for ValueData {
                 res
             }
             ValueKind::Binary(bin) => {
-                let target: String;
-                target = reg_alloc
+                let target = reg_alloc
                     .get_reg(value)
                     .expect("Please implement stack regs logic!")
                     .clone();
@@ -108,7 +106,7 @@ impl LocalGenAsm for ValueData {
                     koopa::ir::BinaryOp::And => process_and_inst(bin, dfg, reg_alloc, target),
                     koopa::ir::BinaryOp::Or => process_or_inst(bin, dfg, reg_alloc, target),
                     _ => {
-                        format!(
+                        println!(
                             "placeholder for binary operation: {:?} op#1: {:?}, op#2: {:?}\n",
                             bin.op(),
                             bin.lhs(),
