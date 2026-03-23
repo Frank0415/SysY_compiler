@@ -4,6 +4,7 @@ use crate::gen_ir_exp::ProcessIr;
 use crate::gen_ir_variables::{SymbolInfo, Variables};
 use koopa::ir::{builder_traits::*, types::*, *};
 use std::fmt::Error;
+use koopa::ir::dfg::DataFlowGraph;
 /*
 * Chap1: Process a single main function into a block
 */
@@ -181,15 +182,15 @@ fn process_stmt(
             let then_bb = func_data
                 .dfg_mut()
                 .new_bb()
-                .basic_block(Some(format!("%then_{}", count).into()));
+                .basic_block(Some(format!("%then{}", count)));
             let else_bb = func_data
                 .dfg_mut()
                 .new_bb()
-                .basic_block(Some(format!("%else_{}", count).into()));
+                .basic_block(Some(format!("%else{}", count)));
             let end_bb = func_data
                 .dfg_mut()
                 .new_bb()
-                .basic_block(Some(format!("%end_{}", count).into()));
+                .basic_block(Some(format!("%end{}", count)));
 
             let cond = if_stmt.cond.process_to_ir(func_data, bb, var_map);
             let br = func_data
@@ -210,13 +211,15 @@ fn process_stmt(
                 .push_key_back(then_bb)
                 .unwrap();
             let then_end_bb = process_stmt(if_stmt.then_stmt, func_data, then_bb, var_map);
-            let jump_end = func_data.dfg_mut().new_value().jump(end_bb);
-            func_data
-                .layout_mut()
-                .bb_mut(then_end_bb)
-                .insts_mut()
-                .push_key_back(jump_end)
-                .unwrap();
+            if !is_bb_terminated(func_data, &then_end_bb) {
+                let jump_end = func_data.dfg_mut().new_value().jump(end_bb);
+                func_data
+                    .layout_mut()
+                    .bb_mut(then_end_bb)
+                    .insts_mut()
+                    .push_key_back(jump_end)
+                    .unwrap();
+            }
 
             // Else branch
             func_data
@@ -229,13 +232,15 @@ fn process_stmt(
             } else {
                 else_bb
             };
-            let jump_end = func_data.dfg_mut().new_value().jump(end_bb);
-            func_data
-                .layout_mut()
-                .bb_mut(else_end_bb)
-                .insts_mut()
-                .push_key_back(jump_end)
-                .unwrap();
+            if !is_bb_terminated(func_data, &else_end_bb) {
+                let jump_end = func_data.dfg_mut().new_value().jump(end_bb);
+                func_data
+                    .layout_mut()
+                    .bb_mut(else_end_bb)
+                    .insts_mut()
+                    .push_key_back(jump_end)
+                    .unwrap();
+            }
 
             // End block
             func_data
@@ -253,4 +258,18 @@ fn type_to_ir(typ: &RawType) -> Type {
         RawType::Int => Type::get_i32(),
         RawType::Void => Type::get_unit(),
     }
+}
+
+fn is_bb_terminated(func_data: &mut FunctionData, bb: &BasicBlock) -> bool {
+    for this_bb_data in func_data.layout().bbs().iter() {
+        if this_bb_data.0 == bb {
+            return if let Some(last_inst) = this_bb_data.1.insts().back_key() {
+                matches!(func_data.dfg().value(*last_inst).kind(),
+                    ValueKind::Return(_)|ValueKind::Jump(_)|ValueKind::Branch(_))
+            } else {
+                false
+            };
+        }
+    }
+    false
 }

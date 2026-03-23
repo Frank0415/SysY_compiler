@@ -1,4 +1,4 @@
-use crate::ast::{Exp};
+use crate::ast::Exp;
 use crate::gen_ir_variables::Variables;
 use koopa::ir::{builder_traits::*, *};
 
@@ -42,12 +42,19 @@ fn process_to_ir_variable(
     if let Some(var) = var_map.get(var) {
         // 生成 load 指令从内存读取值
         let load_inst = func_data.dfg_mut().new_value().load(var);
-        func_data.layout_mut().bb_mut(bb).insts_mut().push_key_back(load_inst).unwrap();
+        func_data
+            .layout_mut()
+            .bb_mut(bb)
+            .insts_mut()
+            .push_key_back(load_inst)
+            .unwrap();
         return load_inst;
     }
 
     // 2. 如果不是常量，再作为变量获取 (当前的 get 方法只返回 Var 类型的 Value)
-    var_map.get(var).expect(&format!("Undefined variable or constant: {}", var))
+    var_map
+        .get(var)
+        .expect(&format!("Undefined variable or constant: {}", var))
 }
 fn process_to_ir_unary(
     func_data: &mut FunctionData,
