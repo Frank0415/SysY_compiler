@@ -1,10 +1,10 @@
+use crate::ast::Decl;
 use crate::ast::{Block, BlockItem, CompUnit, EvalExp, FuncDef, FuncFParam, RawType, Stmt};
-use crate::ast::{Decl};
 use crate::gen_ir_exp::ProcessIr;
 use crate::gen_ir_variables::{SymbolInfo, Variables};
+use koopa::ir::dfg::DataFlowGraph;
 use koopa::ir::{builder_traits::*, types::*, *};
 use std::fmt::Error;
-use koopa::ir::dfg::DataFlowGraph;
 /*
 * Chap1: Process a single main function into a block
 */
@@ -66,6 +66,9 @@ fn process_block(
 ) -> BasicBlock {
     for item in block.stmt {
         bb = process_block_item(item, func_data, bb, var_map);
+        if is_bb_terminated(func_data, &bb) {
+            break;
+        }
     }
     bb
 }
@@ -88,6 +91,7 @@ fn process_block_item(
         }
         BlockItem::Decl(Decl::Var(decl)) => {
             let typ = type_to_ir(&decl.typ);
+            let mut current_bb = bb;
             for def in decl.defs {
                 let id = def.ident;
                 assert!(
@@ -101,23 +105,23 @@ fn process_block_item(
                 );
                 func_data
                     .layout_mut()
-                    .bb_mut(bb)
+                    .bb_mut(current_bb)
                     .insts_mut()
                     .push_key_back(alloc_ptr)
                     .unwrap();
                 if let Some(init_val) = def.init_val {
-                    let val = init_val.exp.process_to_ir(func_data, bb, var_map);
+                    let val = init_val.exp.process_to_ir(func_data, current_bb, var_map);
                     let store_inst = func_data.dfg_mut().new_value().store(val, alloc_ptr);
                     func_data
                         .layout_mut()
-                        .bb_mut(bb)
+                        .bb_mut(current_bb)
                         .insts_mut()
                         .push_key_back(store_inst)
                         .unwrap();
                 }
                 var_map.insert(id, SymbolInfo::Var(alloc_ptr));
             }
-            bb
+            current_bb
         }
         BlockItem::Stmt(stmt) => process_stmt(stmt, func_data, bb, var_map),
     }
@@ -132,39 +136,42 @@ fn process_stmt(
     static mut BLOCK_COUNT: usize = 0;
     match stmt {
         Stmt::Assign { lval, exp } => {
-            let val = exp.process_to_ir(func_data, bb, var_map);
+            let mut current_bb = bb;
+            let val = exp.process_to_ir(func_data, current_bb, var_map);
             if let Some(dest) = var_map.get(&lval) {
                 let store_inst = func_data.dfg_mut().new_value().store(val, dest);
                 func_data
                     .layout_mut()
-                    .bb_mut(bb)
+                    .bb_mut(current_bb)
                     .insts_mut()
                     .push_key_back(store_inst)
                     .unwrap();
             } else {
                 panic!("Undefined variable: {}", lval);
             }
-            bb
+            current_bb
         }
         Stmt::Return(exp) => {
+            let mut current_bb = bb;
             let mut ret_val: Option<Value> = None;
             if let Some(expr) = exp {
-                ret_val = Some(expr.process_to_ir(func_data, bb, var_map));
+                ret_val = Some(expr.process_to_ir(func_data, current_bb, var_map));
             }
             let ret_inst = func_data.dfg_mut().new_value().ret(ret_val);
             func_data
                 .layout_mut()
-                .bb_mut(bb)
+                .bb_mut(current_bb)
                 .insts_mut()
                 .push_key_back(ret_inst)
                 .unwrap();
-            bb
+            current_bb
         }
         Stmt::Exp(exp) => {
+            let mut current_bb = bb;
             if let Some(expr) = exp {
-                let _ = expr.process_to_ir(func_data, bb, var_map);
+                let _ = expr.process_to_ir(func_data, current_bb, var_map);
             }
-            bb
+            current_bb
         }
         Stmt::Block(blk) => {
             var_map.enter_scope();
@@ -192,14 +199,15 @@ fn process_stmt(
                 .new_bb()
                 .basic_block(Some(format!("%end{}", count)));
 
-            let cond = if_stmt.cond.process_to_ir(func_data, bb, var_map);
+            let mut current_bb = bb;
+            let cond = if_stmt.cond.process_to_ir(func_data, current_bb, var_map);
             let br = func_data
                 .dfg_mut()
                 .new_value()
                 .branch(cond, then_bb, else_bb);
             func_data
                 .layout_mut()
-                .bb_mut(bb)
+                .bb_mut(current_bb)
                 .insts_mut()
                 .push_key_back(br)
                 .unwrap();
@@ -264,8 +272,10 @@ fn is_bb_terminated(func_data: &mut FunctionData, bb: &BasicBlock) -> bool {
     for this_bb_data in func_data.layout().bbs().iter() {
         if this_bb_data.0 == bb {
             return if let Some(last_inst) = this_bb_data.1.insts().back_key() {
-                matches!(func_data.dfg().value(*last_inst).kind(),
-                    ValueKind::Return(_)|ValueKind::Jump(_)|ValueKind::Branch(_))
+                matches!(
+                    func_data.dfg().value(*last_inst).kind(),
+                    ValueKind::Return(_) | ValueKind::Jump(_) | ValueKind::Branch(_)
+                )
             } else {
                 false
             };
