@@ -2,7 +2,6 @@ use crate::ast::Decl;
 use crate::ast::{Block, BlockItem, CompUnit, EvalExp, FuncDef, FuncFParam, RawType, Stmt};
 use crate::gen_ir_exp::ProcessIr;
 use crate::gen_ir_variables::{SymbolInfo, Variables};
-use koopa::ir::dfg::DataFlowGraph;
 use koopa::ir::{builder_traits::*, types::*, *};
 use std::fmt::Error;
 /*
@@ -99,10 +98,10 @@ fn process_block_item(
                     "Should not declare a variable multiple times in the same scope!"
                 );
                 let alloc_ptr = func_data.dfg_mut().new_value().alloc(typ.clone());
-                func_data.dfg_mut().set_value_name(
-                    alloc_ptr,
-                    Some(format!("@{}_{}", id, var_map.get_scope_layer())),
-                );
+                let unique_id = var_map.get_id();
+                func_data
+                    .dfg_mut()
+                    .set_value_name(alloc_ptr, Some(format!("@{}_{}", id, unique_id)));
                 func_data
                     .layout_mut()
                     .bb_mut(current_bb)
@@ -110,7 +109,9 @@ fn process_block_item(
                     .push_key_back(alloc_ptr)
                     .unwrap();
                 if let Some(init_val) = def.init_val {
-                    let val = init_val.exp.process_to_ir(func_data, current_bb, var_map);
+                    let val = init_val
+                        .exp
+                        .process_to_ir(func_data, &mut current_bb, var_map);
                     let store_inst = func_data.dfg_mut().new_value().store(val, alloc_ptr);
                     func_data
                         .layout_mut()
@@ -133,11 +134,10 @@ fn process_stmt(
     bb: BasicBlock,
     var_map: &mut Variables,
 ) -> BasicBlock {
-    static mut BLOCK_COUNT: usize = 0;
     match stmt {
         Stmt::Assign { lval, exp } => {
             let mut current_bb = bb;
-            let val = exp.process_to_ir(func_data, current_bb, var_map);
+            let val = exp.process_to_ir(func_data, &mut current_bb, var_map);
             if let Some(dest) = var_map.get(&lval) {
                 let store_inst = func_data.dfg_mut().new_value().store(val, dest);
                 func_data
@@ -155,7 +155,7 @@ fn process_stmt(
             let mut current_bb = bb;
             let mut ret_val: Option<Value> = None;
             if let Some(expr) = exp {
-                ret_val = Some(expr.process_to_ir(func_data, current_bb, var_map));
+                ret_val = Some(expr.process_to_ir(func_data, &mut current_bb, var_map));
             }
             let ret_inst = func_data.dfg_mut().new_value().ret(ret_val);
             func_data
@@ -169,7 +169,7 @@ fn process_stmt(
         Stmt::Exp(exp) => {
             let mut current_bb = bb;
             if let Some(expr) = exp {
-                let _ = expr.process_to_ir(func_data, current_bb, var_map);
+                let _ = expr.process_to_ir(func_data, &mut current_bb, var_map);
             }
             current_bb
         }
@@ -180,27 +180,25 @@ fn process_stmt(
             new_bb
         }
         Stmt::IF(if_stmt) => {
-            let count = unsafe {
-                let c = BLOCK_COUNT;
-                BLOCK_COUNT += 1;
-                c
-            };
+            let id = var_map.get_id();
 
             let then_bb = func_data
                 .dfg_mut()
                 .new_bb()
-                .basic_block(Some(format!("%then{}", count)));
+                .basic_block(Some(format!("%then_{}", id)));
             let else_bb = func_data
                 .dfg_mut()
                 .new_bb()
-                .basic_block(Some(format!("%else{}", count)));
+                .basic_block(Some(format!("%else_{}", id)));
             let end_bb = func_data
                 .dfg_mut()
                 .new_bb()
-                .basic_block(Some(format!("%end{}", count)));
+                .basic_block(Some(format!("%end_{}", id)));
 
             let mut current_bb = bb;
-            let cond = if_stmt.cond.process_to_ir(func_data, current_bb, var_map);
+            let cond = if_stmt
+                .cond
+                .process_to_ir(func_data, &mut current_bb, var_map);
             let br = func_data
                 .dfg_mut()
                 .new_value()
