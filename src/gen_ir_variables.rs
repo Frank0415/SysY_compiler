@@ -2,6 +2,7 @@ use koopa::ir::Value;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy)]
+
 pub enum SymbolInfo {
     Const(i32),
     Var(Value),
@@ -9,7 +10,9 @@ pub enum SymbolInfo {
 }
 
 pub struct Variables {
+    // Stack of scopes, where each scope is a Map
     scopes: Vec<HashMap<String, SymbolInfo>>,
+    // Global counter for unique labels
     counter: u64,
 }
 
@@ -42,24 +45,34 @@ impl Variables {
     }
 
     pub fn contains_in_current_scope(&self, name: &str) -> bool {
-        self.scopes.last().and_then(|scope| scope.get(name)).is_some()
+        self.scopes
+            .last()
+            .and_then(|scope| scope.get(name))
+            .is_some()
     }
 
     pub fn get_const(&self, name: &str) -> Option<i32> {
-        self.scopes.iter().rev().find_map(|scope| match scope.get(name) {
-            Some(SymbolInfo::Const(val)) => Some(*val),
-            _ => None,
-        })
+        // Search from most recent scope to oldest
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| match scope.get(name) {
+                Some(SymbolInfo::Const(val)) => Some(*val),
+                _ => None,
+            })
     }
 
     pub fn get(&self, name: &str) -> Option<Value> {
-        self.scopes.iter().rev().find_map(|scope| match scope.get(name) {
-            Some(SymbolInfo::Var(val)) => Some(*val),
-            _ => None,
-        })
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| match scope.get(name) {
+                Some(SymbolInfo::Var(val)) => Some(*val),
+                _ => None,
+            })
     }
 
     pub fn get_scope_layer(&self) -> usize {
-        self.scopes.len()
+        return self.scopes.len();
     }
 }
