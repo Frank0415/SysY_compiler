@@ -114,3 +114,4 @@ http-client.private.env.json
 hello.koopa
 run.sh
 test.sh
+.vscode/
