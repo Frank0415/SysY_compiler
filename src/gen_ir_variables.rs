@@ -16,6 +16,12 @@ pub struct Variables {
     counter: u64,
 }
 
+impl Default for Variables {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Variables {
     pub fn new() -> Self {
         Self {
@@ -73,6 +79,6 @@ impl Variables {
     }
 
     pub fn get_scope_layer(&self) -> usize {
-        return self.scopes.len();
+        self.scopes.len()
     }
 }

@@ -24,7 +24,6 @@ pub struct LiveInterval {
 #[derive(Debug, Clone)]
 pub struct ActiveInterval {
     end: usize,
-
     value: Value,
     reg: String,
 }
@@ -268,11 +267,6 @@ impl LinearScanAlloc {
         }
         ret
     }
-
-    // fn spill_value(&mut self, value: Value) {
-    //     stack_slots.insert(value, self.next_stack_slot);
-    //     self.next_stack_slot += 4; // 假设 4 字节
-    // }
 
     pub fn acquire_scratch(&self) -> String {
         self.scratch_regs
