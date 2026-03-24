@@ -52,7 +52,14 @@ impl Debug for Stmt {
             Stmt::Return(Some(exp)) => write!(f, "return {:?};", exp),
             Stmt::Return(None) => write!(f, "return;"),
             Stmt::IF(if_block) => write!(f, "{:?}", *if_block),
+            Stmt::WHILE(while_block) => write!(f, "{:?}", *while_block),
         }
+    }
+}
+
+impl Debug for WHILE {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "while ({:?}) {:?}", self.cond, self.body_while)
     }
 }
 

@@ -256,6 +256,36 @@ fn process_stmt(
                 .unwrap();
             end_bb
         }
+        Stmt::WHILE(while_stmt) => {
+            let id = var_map.get_id();
+
+            let mut while_entry = func_data.dfg_mut().new_bb().basic_block(Some(format!("%while_ent_{}", id)));
+            let while_body = func_data.dfg_mut().new_bb().basic_block(Some(format!("%while_body_{}", id)));
+            let mut while_end = func_data.dfg_mut().new_bb().basic_block(Some(format!("%while_end_{}", id)));
+
+            // the current block
+            let current_bb = bb;
+            let jump_into_entry = func_data.dfg_mut().new_value().jump(while_entry);
+            func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(jump_into_entry).unwrap();
+
+            // while_entry block
+            func_data.layout_mut().bbs_mut().push_key_back(while_entry).unwrap();
+            let cond = while_stmt.cond.process_to_ir(func_data, &mut while_entry, var_map);
+            let jump_into_current = func_data.dfg_mut().new_value().branch(cond, while_body, while_end);
+            func_data.layout_mut().bb_mut(while_entry).insts_mut().push_key_back(jump_into_current).unwrap();
+
+            // while_body block
+            func_data.layout_mut().bbs_mut().push_key_back(while_body).unwrap();
+            let while_body_bb = process_stmt(while_stmt.body_while, func_data, while_body, var_map);
+            if !is_bb_terminated(func_data, &while_body_bb) {
+                let jump_back_stmt = func_data.dfg_mut().new_value().jump(while_entry);
+                func_data.layout_mut().bb_mut(while_body_bb).insts_mut().push_key_back(jump_back_stmt).unwrap();
+            }
+
+            // while_end block
+            func_data.layout_mut().bbs_mut().push_key_back(while_end).unwrap();
+            while_end
+        }
     }
 }
 

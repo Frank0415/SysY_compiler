@@ -43,6 +43,7 @@ pub enum Stmt {
     Exp(Option<Exp>),    // 新增：[Exp] ";" 语句（若为 None 则是单独的空分号 ";"）
     Return(Option<Exp>), // 修改：将 Return(Exp) 改为返回 Option<Exp>，支持 "return;"
     IF(Box<IF>),
+    WHILE(Box<WHILE>),
 }
 
 #[derive(PartialEq)]
@@ -52,10 +53,13 @@ pub struct IF {
     pub else_stmt: Option<Stmt>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct WHILE {}
-#[derive(Debug, PartialEq)]
-pub enum UnaryExp {}
+#[derive(PartialEq)]
+pub struct WHILE {
+    pub cond: Exp,
+    pub body_while: Stmt,
+}
+// #[derive(Debug, PartialEq)]
+// pub enum UnaryExp {}
 
 #[derive(PartialEq)]
 pub enum Exp {

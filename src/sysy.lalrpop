@@ -132,9 +132,16 @@ MatchedStmt: Stmt = {
     "if" "(" <cond: Exp> ")" <base_if: MatchedStmt> "else" <else_if: MatchedStmt>
         => Stmt::IF(Box::new(IF {
             cond,
-            then_stmt:base_if,
+            then_stmt: base_if,
             else_stmt: Some(else_if),
         })),
+    "while" "(" <cond:Exp> ")" <body_while: MatchedStmt>
+        => Stmt::WHILE(Box::new(WHILE{
+            cond,
+            body_while,
+        })),
+    "break" ";" =>
+    "continue" ";"
 };
 
 UnmatchedStmt: Stmt = {
