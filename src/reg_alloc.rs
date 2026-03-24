@@ -17,7 +17,7 @@ pub struct LiveInterval {
     value: Value,
     start: usize,        // 指令序号（程序点）
     end: usize,          // 最后使用点
-    reg: Option<String>, // 分配的寄存器（如果有）
+    //reg: Option<String>, // 分配的寄存器（如果有）
 }
 
 /// 按 end 排序用于 active 集合
@@ -36,9 +36,7 @@ impl PartialEq for ActiveInterval {
 }
 impl Eq for ActiveInterval {}
 impl PartialOrd for ActiveInterval {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(other.end.cmp(&self.end)) // 最小堆（end 小的在顶部）
-    }
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
 }
 impl Ord for ActiveInterval {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -59,7 +57,7 @@ pub struct LinearScanAlloc {
     scratch_regs: RefCell<Vec<String>>,
 }
 
-struct op_results {
+struct OpResults {
     reg: Vec<Value>,
     stack: Vec<Value>,
 }
@@ -136,7 +134,6 @@ impl LinearScanAlloc {
                 value: *k,
                 start: *v,
                 end: *end.get(k).unwrap_or(v), // 如果没有使用点，end 就是 start
-                reg: None,
             };
             println!("Live interval for value {:?}: {:?}", k, live_interval);
             liveint.push(live_interval); // 记得把构建好的 interval 存入 Vec
@@ -222,7 +219,7 @@ impl LinearScanAlloc {
         }
 
         // 3.分配stack
-        for (stack, place) in stack_maps.iter() {
+        for (stack, _place) in stack_maps.iter() {
             stack_slots.push(*stack);
             println!(
                 "Assigned stack size {} assigned to value {:?}",
@@ -252,9 +249,9 @@ impl LinearScanAlloc {
         self.stack_count
     }
 
-    fn get_operands(&self, data: &koopa::ir::entities::ValueData, inst: &Value) -> op_results {
+    fn get_operands(&self, data: &koopa::ir::entities::ValueData, inst: &Value) -> OpResults {
         use koopa::ir::ValueKind::*;
-        let mut ret = op_results {
+        let mut ret = OpResults {
             reg: Vec::new(),
             stack: Vec::new(),
         };
