@@ -259,42 +259,107 @@ fn process_stmt(
         Stmt::WHILE(while_stmt) => {
             let id = var_map.get_id();
 
-            let mut while_entry = func_data.dfg_mut().new_bb().basic_block(Some(format!("%while_ent_{}", id)));
-            let while_body = func_data.dfg_mut().new_bb().basic_block(Some(format!("%while_body_{}", id)));
-            let mut while_end = func_data.dfg_mut().new_bb().basic_block(Some(format!("%while_end_{}", id)));
+            let while_entry = func_data
+                .dfg_mut()
+                .new_bb()
+                .basic_block(Some(format!("%while_ent_{}", id)));
+            let while_body = func_data
+                .dfg_mut()
+                .new_bb()
+                .basic_block(Some(format!("%while_body_{}", id)));
+            let while_end = func_data
+                .dfg_mut()
+                .new_bb()
+                .basic_block(Some(format!("%while_end_{}", id)));
 
-            // the current block
-            let current_bb = bb;
+            // current block jumps to entry
             let jump_into_entry = func_data.dfg_mut().new_value().jump(while_entry);
-            func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(jump_into_entry).unwrap();
+            func_data
+                .layout_mut()
+                .bb_mut(bb)
+                .insts_mut()
+                .push_key_back(jump_into_entry)
+                .unwrap();
 
             // while_entry block
-            func_data.layout_mut().bbs_mut().push_key_back(while_entry).unwrap();
-            let cond = while_stmt.cond.process_to_ir(func_data, &mut while_entry, var_map);
-            let jump_into_current = func_data.dfg_mut().new_value().branch(cond, while_body, while_end);
-            func_data.layout_mut().bb_mut(while_entry).insts_mut().push_key_back(jump_into_current).unwrap();
+            func_data
+                .layout_mut()
+                .bbs_mut()
+                .push_key_back(while_entry)
+                .unwrap();
+
+            // Push jump context for break/continue
+            var_map.enter_while(&while_entry, &while_end);
+
+            let mut curr_entry_bb = while_entry;
+            let cond = while_stmt
+                .cond
+                .process_to_ir(func_data, &mut curr_entry_bb, var_map);
+            let br = func_data
+                .dfg_mut()
+                .new_value()
+                .branch(cond, while_body, while_end);
+            func_data
+                .layout_mut()
+                .bb_mut(curr_entry_bb)
+                .insts_mut()
+                .push_key_back(br)
+                .unwrap();
 
             // while_body block
-            func_data.layout_mut().bbs_mut().push_key_back(while_body).unwrap();
-            let while_body_bb = process_stmt(while_stmt.body_while, func_data, while_body, var_map);
-            if !is_bb_terminated(func_data, &while_body_bb) {
+            func_data
+                .layout_mut()
+                .bbs_mut()
+                .push_key_back(while_body)
+                .unwrap();
+            let body_end_bb = process_stmt(while_stmt.body_while, func_data, while_body, var_map);
+            if !is_bb_terminated(func_data, &body_end_bb) {
                 let jump_back_stmt = func_data.dfg_mut().new_value().jump(while_entry);
-                func_data.layout_mut().bb_mut(while_body_bb).insts_mut().push_key_back(jump_back_stmt).unwrap();
+                func_data
+                    .layout_mut()
+                    .bb_mut(body_end_bb)
+                    .insts_mut()
+                    .push_key_back(jump_back_stmt)
+                    .unwrap();
             }
 
+            // Pop jump context
+            var_map.exit_while();
+
             // while_end block
-            func_data.layout_mut().bbs_mut().push_key_back(while_end).unwrap();
+            func_data
+                .layout_mut()
+                .bbs_mut()
+                .push_key_back(while_end)
+                .unwrap();
+
             while_end
         }
         Stmt::Break => {
-            let mut current_bb = bb;
-
-            current_bb
+            let break_block = var_map
+                .get_break()
+                .expect("break statement outside of while loop");
+            let jump = func_data.dfg_mut().new_value().jump(break_block);
+            func_data
+                .layout_mut()
+                .bb_mut(bb)
+                .insts_mut()
+                .push_key_back(jump)
+                .unwrap();
+            bb
         }
         Stmt::Continue => {
-            let mut current_bb = bb;
-
-            current_bb
+            let cont_block = var_map
+                .get_continue()
+                .expect("continue statement outside of while loop");
+            let jump = func_data.dfg_mut().new_value().jump(cont_block);
+            func_data
+                .layout_mut()
+                .bb_mut(bb)
+                .insts_mut()
+                .push_key_back(jump)
+                .unwrap();
+            bb
         }
     }
 }
