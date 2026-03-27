@@ -286,6 +286,16 @@ fn process_stmt(
             func_data.layout_mut().bbs_mut().push_key_back(while_end).unwrap();
             while_end
         }
+        Stmt::Break => {
+            let mut current_bb = bb;
+
+            current_bb
+        }
+        Stmt::Continue => {
+            let mut current_bb = bb;
+
+            current_bb
+        }
     }
 }
 

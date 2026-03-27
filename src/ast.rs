@@ -44,6 +44,8 @@ pub enum Stmt {
     Return(Option<Exp>), // 修改：将 Return(Exp) 改为返回 Option<Exp>，支持 "return;"
     IF(Box<IF>),
     WHILE(Box<WHILE>),
+    Break,
+    Continue,
 }
 
 #[derive(PartialEq)]

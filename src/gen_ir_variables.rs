@@ -1,4 +1,4 @@
-use koopa::ir::Value;
+use koopa::ir::{BasicBlock, Value};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy)]
@@ -14,6 +14,9 @@ pub struct Variables {
     scopes: Vec<HashMap<String, SymbolInfo>>,
     // Global counter for unique labels
     counter: u64,
+    // Stack of while scopes
+    // To record what block continue or break could jump to
+    jump_stack: Context,
 }
 
 impl Default for Variables {
@@ -27,6 +30,7 @@ impl Variables {
         Self {
             scopes: Vec::new(),
             counter: 0,
+            jump_stack: Context::new(),
         }
     }
 
@@ -80,5 +84,61 @@ impl Variables {
 
     pub fn get_scope_layer(&self) -> usize {
         self.scopes.len()
+    }
+
+    pub fn enter_while(&mut self, entry_bb: &BasicBlock, end_bb: &BasicBlock) {
+        self.jump_stack.enter_while(entry_bb, end_bb);
+    }
+    pub fn exit_while(&mut self) {
+        self.jump_stack.exit_while();
+    }
+    pub fn get_continue(&self) -> Option<BasicBlock> {
+        self.jump_stack.get_continue()
+    }
+
+    pub fn get_break(&mut self) -> Option<BasicBlock> {
+        self.jump_stack.get_break()
+    }
+}
+
+struct BaseContext {
+    entry_bb: BasicBlock, // continue 跳转的目标（条件检查块）
+    end_bb: BasicBlock, // break 跳转的目标（循环结束后的块）
+}
+
+pub struct Context {
+    ctx: Vec<BaseContext>,
+}
+
+impl Context {
+    fn new() -> Self {
+        Context { ctx: Vec::new() }
+    }
+
+    fn enter_while(&mut self, entry_bb: &BasicBlock, end_bb: &BasicBlock) {
+        self.ctx.push(BaseContext {
+            entry_bb: *entry_bb,
+            end_bb: *end_bb,
+        });
+    }
+
+    fn exit_while(&mut self) {
+        self.ctx.pop();
+    }
+
+    fn get_continue(&self) -> Option<BasicBlock> {
+        if self.ctx.is_empty() {
+            None
+        } else {
+            Some(self.ctx.last().unwrap().entry_bb)
+        }
+    }
+
+    fn get_break(&self) -> Option<BasicBlock> {
+        if self.ctx.is_empty() {
+            None
+        } else {
+            Some(self.ctx.last().unwrap().end_bb)
+        }
     }
 }

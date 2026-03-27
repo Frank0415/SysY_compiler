@@ -140,8 +140,8 @@ MatchedStmt: Stmt = {
             cond,
             body_while,
         })),
-    "break" ";" =>
-    "continue" ";"
+    "break" ";" => Stmt::Break,
+    "continue" ";" => Stmt::Continue,
 };
 
 UnmatchedStmt: Stmt = {

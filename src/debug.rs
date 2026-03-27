@@ -53,6 +53,8 @@ impl Debug for Stmt {
             Stmt::Return(None) => write!(f, "return;"),
             Stmt::IF(if_block) => write!(f, "{:?}", *if_block),
             Stmt::WHILE(while_block) => write!(f, "{:?}", *while_block),
+            Stmt::Break => write!(f, "break;"),
+            Stmt::Continue => write!(f, "continue;"),
         }
     }
 }
