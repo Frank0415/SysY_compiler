@@ -24,8 +24,14 @@ match {
 // 1. 顶层编译单元 (Compilation Unit)
 // ============================================
 
-// 程序入口：目前只支持单函数定义
-pub CompUnit: CompUnit = <func_def: FuncDef> => CompUnit { func_def };
+// 顶层编译单元由多个顶层项组成 (函数或全局声明)
+pub CompUnit: CompUnit = <items: CompUnitItem*> => CompUnit { items };
+
+// 顶层项定义
+CompUnitItem: CompUnitItem = {
+    <func: FuncDef> => CompUnitItem::FuncDef(func),
+    <decl: Decl> => CompUnitItem::Decl(decl),
+};
 
 // ============================================
 // 2. 函数定义 (Function Definition)
@@ -35,14 +41,17 @@ pub CompUnit: CompUnit = <func_def: FuncDef> => CompUnit { func_def };
 FuncDef: FuncDef = {
     <func_type: RawType>
     <ident: Ident>
-    "(" <func_params: FuncFParams> ")"
+    "(" <func_params: FuncFParams?> ")"
     <block: Block>
-    => FuncDef { func_type, ident, func_params, block }
+    => FuncDef {
+        func_type,
+        ident,
+        func_params: func_params.unwrap_or_default(),
+        block
+    }
 };
 
-// 函数参数列表：空 | 参数1, 参数2, ...
 FuncFParams: Vec<FuncFParam> = {
-    () => Vec::new(),
     <head: FuncFParam> <tail: ("," <FuncFParam>)*> => {
         let mut params = vec![head];
         params.extend(tail);
@@ -50,8 +59,7 @@ FuncFParams: Vec<FuncFParam> = {
     }
 };
 
-// 单个函数参数：类型 标识符
-FuncFParam: FuncFParam = <bt: RawType> <id: Ident> => FuncFParam { bt: bt, id };
+FuncFParam: FuncFParam = <bt: RawType> <id: Ident> => FuncFParam { bt, id };
 
 // 函数返回类型（目前仅支持 int）
 // RawType: RawType = "int" => RawType::Int;
@@ -104,7 +112,12 @@ VarDecl: VarDecl = {
         }
 }
 
-VarDef: VarDef = {<ident: Ident> <init_val: ("=" <VarExp>)?> => VarDef { ident, init_val }};
+VarDef: VarDef = {
+    <ident: Ident> "=" <init_val: VarExp>
+        => VarDef { ident, init_val: Some(init_val) },
+    <ident: Ident>
+        => VarDef { ident, init_val: None },
+};
 
 VarExp: VarExp = <exp: Exp> => VarExp { exp };
 
@@ -112,6 +125,16 @@ VarExp: VarExp = <exp: Exp> => VarExp { exp };
 RawType: RawType = {
     "int" => RawType::Int,
     "void" => RawType::Void,
+};
+
+// 3.extra: Calling A Function
+
+FuncCallParams: Vec<Exp> = {
+    <head: Exp> <tail: ("," <Exp>)*> => {
+        let mut args = vec![head];
+        args.extend(tail);
+        args
+    }
 };
 
 // ============================================
@@ -227,6 +250,8 @@ MulExp: Exp = {
 
 // 一元运算 (!, -, +)，右结合（递归在右侧）
 UnaryExp: Exp = {
+    <ident: Ident> "(" <args: FuncCallParams?> ")"
+        => Exp::Call { ident, args: args.unwrap_or_default() },
     <pexp: PrimaryExp> => pexp,
     <uop: UnaryOp> <uexp: UnaryExp>
     => Exp::Unary { op: uop, exp: Box::new(uexp) },

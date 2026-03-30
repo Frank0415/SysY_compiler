@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::ast::Exp;
 use crate::gen_ir_variables::Variables;
 use koopa::ir::{builder_traits::*, *};
@@ -8,6 +9,7 @@ pub trait ProcessIr {
         func_data: &mut FunctionData,
         bb: &mut BasicBlock,
         var_map: &mut Variables,
+        func_map: &HashMap<String, Function>,
     ) -> Value;
 }
 
@@ -17,6 +19,7 @@ impl ProcessIr for Exp {
         func_data: &mut FunctionData,
         bb: &mut BasicBlock,
         var_map: &mut Variables,
+        func_map: &HashMap<String, Function>,
     ) -> Value {
         match self {
             Exp::Number(val) => func_data.dfg_mut().new_value().integer(*val),
@@ -25,6 +28,7 @@ impl ProcessIr for Exp {
                 process_to_ir_binary(func_data, bb, op, lhs, rhs, var_map)
             }
             Exp::Var(variable) => process_to_ir_variable(func_data, bb, variable, var_map),
+            Exp::Call { ident, args } => process_to_ir_call(func_data, bb, var_map, func_map, ident, args),
         }
     }
 }
@@ -51,6 +55,18 @@ fn process_to_ir_variable(
     }
 
     panic!("Undefined variable or constant: {}", var);
+}
+
+fn process_to_ir_call(
+    func_data: &mut FunctionData,
+    bb: &mut BasicBlock,
+    var_map: &mut Variables,
+    func_map: &HashMap<String, Function>,
+    ident: &String,
+    args: &Vec<Exp>,
+) -> Value {
+    for arg in args {}
+    unimplemented!()
 }
 
 fn process_to_ir_unary(

@@ -13,7 +13,13 @@ use std::boxed::Box;
 
 #[derive(PartialEq)]
 pub struct CompUnit {
-    pub func_def: FuncDef,
+    pub items: Vec<CompUnitItem>,
+}
+
+#[derive(PartialEq)]
+pub enum CompUnitItem {
+    Decl(Decl),
+    FuncDef(FuncDef),
 }
 
 #[derive(PartialEq)]
@@ -23,6 +29,12 @@ pub struct FuncDef {
     pub func_params: Vec<FuncFParam>,
     pub block: Block,
 }
+
+// #[derive(Debug, Clone)]
+// pub enum GlobalDecl {
+//     Const(ConstDecl),  // const int x = 1;
+//     Var(VarDecl),      // int y = 2; 或 int z;（未初始化自动为0）
+// }
 
 #[derive(PartialEq)]
 pub enum RawType {
@@ -75,6 +87,10 @@ pub enum Exp {
         op: BinaryOp,
         lhs: Box<Exp>,
         rhs: Box<Exp>,
+    },
+    Call {
+        ident: String,
+        args: Vec<Exp>,
     },
 }
 
@@ -244,6 +260,9 @@ impl EvalExp for Exp {
                         }
                     }
                 }
+            }
+            Exp::Call { ident, args } => {
+                panic!("Function call should not be evaluated at compile time!")
             }
         }
     }

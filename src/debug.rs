@@ -8,6 +8,16 @@ impl Debug for Exp {
             Exp::Var(s) => write!(f, "{}", s),
             Exp::Unary { op, exp } => write!(f, "({:?} {:?})", op, exp),
             Exp::Binary { op, lhs, rhs } => write!(f, "({:?} {:?} {:?})", lhs, op, rhs),
+            Exp::Call { ident, args } => {
+                write!(f, "{}(", ident)?;
+                for (num, arg) in args.iter().enumerate() {
+                    if num != 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{:?}", arg)?;
+                }
+                write!(f, ")")
+            }
         }
     }
 }
@@ -158,7 +168,16 @@ impl Debug for RawType {
 
 impl Debug for CompUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "CompUnit {{ {:?} }}", self.func_def)
+        write!(f, "CompUnit {{ {:?} }}", self.items)
+    }
+}
+
+impl Debug for CompUnitItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CompUnitItem::Decl(decl) => write!(f, "TopDecl: {:?}", decl),
+            CompUnitItem::FuncDef(func_def) => write!(f, "TopFunc: {:?}", func_def),
+        }
     }
 }
 

@@ -1,38 +1,86 @@
 use crate::ast::Decl;
-use crate::ast::{Block, BlockItem, CompUnit, EvalExp, FuncDef, FuncFParam, RawType, Stmt};
+use crate::ast::{
+    Block, BlockItem, CompUnit, CompUnitItem, EvalExp, FuncDef, FuncFParam, RawType, Stmt,
+};
 use crate::gen_ir_exp::ProcessIr;
 use crate::gen_ir_variables::{SymbolInfo, Variables};
 use koopa::ir::{builder_traits::*, types::*, *};
+use std::any::Any;
 use std::fmt::Error;
+use std::collections::HashMap;
 /*
 * Chap1: Process a single main function into a block
 */
 pub fn gen_ir(cu: CompUnit) -> Result<Program, Error> {
     let mut variable_maps = Variables::new();
     let mut program = Program::new();
+    let mut function_maps: HashMap<String, Function> = HashMap::new();
 
-    process_func(&mut variable_maps, &mut program, cu);
+    // pass1: 先把所有函数原型建出来，拿到 Function 句柄
+    for item in &cu.items {
+        if let CompUnitItem::FuncDef(fd) = item {
+            let params: Vec<(Option<String>, Type)> = fd
+                .func_params
+                .iter()
+                .map(|p| (Some(format!("%{}", p.id)), type_to_ir(&p.bt)))
+                .collect();
+
+            let func_name = format!("@{}", fd.ident);
+            let ret_ty = type_to_ir(&fd.func_type);
+            let f = program.new_func(FunctionData::with_param_names(func_name, params, ret_ty));
+
+            assert!(
+                func_map.insert(fd.ident.clone(), f).is_none(),
+                "duplicate function definition: {}",
+                fd.ident
+            );
+        }
+    }
+
+    for item in cu.items {
+        match item {
+            CompUnitItem::FuncDef(func_def) => {
+                process_func(&mut variable_maps, &mut program, func_def);
+            }
+            CompUnitItem::Decl(_decl) => {
+                unimplemented!();
+                // TODO: Implement global declarations
+                // For now, parsing is supported but IR generation is a placeholder
+            }
+        }
+    }
 
     Ok(program)
 }
 
-fn process_func(var_map: &mut Variables, prog: &mut Program, cu: CompUnit) {
+fn process_func(var_map: &mut Variables, prog: &mut Program, func_def: FuncDef) {
     var_map.enter_scope();
-    // Pattern match the CompUnit to extract the function definition
+    // Pattern match the FuncDef to extract details
     let FuncDef {
         ident,
         func_params,
         block,
-        ..
-    } = cu.func_def;
+        func_type,
+    } = func_def;
+
+    let param_defs: Vec<(String, RawType)> =
+        func_params.into_iter().map(|p| (p.id, p.bt)).collect();
+
+    let params: Vec<(Option<String>, Type)> = param_defs
+        .iter()
+        .map(|(id, bt)| (Some(format!("%{}", id)), type_to_ir(bt)))
+        .collect();
 
     let func_name = format!("@{}", ident);
-    let params: Vec<(Option<String>, Type)> = process_func_params(func_params);
-    let ret_ty = type_to_ir(&cu.func_def.func_type);
+    let ret_ty = type_to_ir(&func_type);
+    let is_void_return = ret_ty.is_unit();
     let func = prog.new_func(FunctionData::with_param_names(func_name, params, ret_ty));
     let func_data = prog.func_mut(func);
-    // let _arg1 = func_data.params()[0];
-    // entry basic block
+
+    // Variable maps
+    let p: Vec<Value> = func_data.params().to_vec();
+    let incoming: Vec<Value> = func_data.params().to_vec();
+
     let entry = func_data
         .dfg_mut()
         .new_bb()
@@ -43,18 +91,45 @@ fn process_func(var_map: &mut Variables, prog: &mut Program, cu: CompUnit) {
         .push_key_back(entry)
         .unwrap();
 
-    process_block(block, func_data, entry, var_map);
-    var_map.exit_scope();
-}
+    for (i, (id, bt)) in param_defs.iter().enumerate() {
+        assert!(
+            !var_map.contains_in_current_scope(id),
+            "duplicate parameter name in function scope"
+        );
+        let ptr = func_data.dfg_mut().new_value().alloc(type_to_ir(bt));
+        func_data
+            .layout_mut()
+            .bb_mut(entry)
+            .insts_mut()
+            .push_key_back(ptr)
+            .unwrap();
 
-fn process_func_params(func_params: Vec<FuncFParam>) -> Vec<(Option<String>, Type)> {
-    let mut params: Vec<(Option<String>, Type)> = Vec::new();
-    for param in func_params {
-        let typ = type_to_ir(&param.bt);
-        let name = format!("%{}", param.id);
-        params.push((Some(name), typ));
+        let st = func_data.dfg_mut().new_value().store(incoming[i], ptr);
+        func_data
+            .layout_mut()
+            .bb_mut(entry)
+            .insts_mut()
+            .push_key_back(st)
+            .unwrap();
+
+        var_map.insert(id.clone(), SymbolInfo::Var(ptr));
     }
-    params
+
+    let end_bb = process_block(block, func_data, entry, var_map);
+    if !is_bb_terminated(func_data, &end_bb) {
+        if is_void_return {
+            let ret_inst = func_data.dfg_mut().new_value().ret(None);
+            func_data
+                .layout_mut()
+                .bb_mut(end_bb)
+                .insts_mut()
+                .push_key_back(ret_inst)
+                .unwrap();
+        } else {
+            panic!("Non-void function should end with a return statement!");
+        }
+    }
+    var_map.exit_scope();
 }
 
 fn process_block(
