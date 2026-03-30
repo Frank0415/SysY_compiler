@@ -15,9 +15,9 @@ pub enum VariableLocation {
 #[derive(Debug, Clone)]
 pub struct LiveInterval {
     value: Value,
-    start: usize,        // 指令序号（程序点）
-    end: usize,          // 最后使用点
-    //reg: Option<String>, // 分配的寄存器（如果有）
+    start: usize, // 指令序号（程序点）
+    end: usize,   // 最后使用点
+                  //reg: Option<String>, // 分配的寄存器（如果有）
 }
 
 /// 按 end 排序用于 active 集合
@@ -35,7 +35,9 @@ impl PartialEq for ActiveInterval {
 }
 impl Eq for ActiveInterval {}
 impl PartialOrd for ActiveInterval {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 impl Ord for ActiveInterval {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -227,7 +229,13 @@ impl LinearScanAlloc {
             );
         }
 
-        self.stack_count = stack_slots.len() * 4;
+        let raw_stack_size = stack_slots.len() * 4;
+        // RISC-V ABI: keep stack frame 16-byte aligned.
+        self.stack_count = if raw_stack_size == 0 {
+            0
+        } else {
+            ((raw_stack_size + 15) / 16) * 16
+        };
         for (idx, stack) in stack_slots.iter().enumerate() {
             self.stack_slots.insert(*stack, self.stack_count - idx * 4);
         }

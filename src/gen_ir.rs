@@ -6,8 +6,8 @@ use crate::gen_ir_exp::ProcessIr;
 use crate::gen_ir_variables::{SymbolInfo, Variables};
 use koopa::ir::{builder_traits::*, types::*, *};
 use std::any::Any;
-use std::fmt::Error;
 use std::collections::HashMap;
+use std::fmt::Error;
 /*
 * Chap1: Process a single main function into a block
 */
@@ -30,7 +30,7 @@ pub fn gen_ir(cu: CompUnit) -> Result<Program, Error> {
             let f = program.new_func(FunctionData::with_param_names(func_name, params, ret_ty));
 
             assert!(
-                func_map.insert(fd.ident.clone(), f).is_none(),
+                function_maps.insert(fd.ident.clone(), f).is_none(),
                 "duplicate function definition: {}",
                 fd.ident
             );
@@ -40,7 +40,7 @@ pub fn gen_ir(cu: CompUnit) -> Result<Program, Error> {
     for item in cu.items {
         match item {
             CompUnitItem::FuncDef(func_def) => {
-                process_func(&mut variable_maps, &mut program, func_def);
+                process_func(&mut variable_maps, &mut program, func_def, &function_maps);
             }
             CompUnitItem::Decl(_decl) => {
                 unimplemented!();
@@ -53,7 +53,7 @@ pub fn gen_ir(cu: CompUnit) -> Result<Program, Error> {
     Ok(program)
 }
 
-fn process_func(var_map: &mut Variables, prog: &mut Program, func_def: FuncDef) {
+fn process_func(var_map: &mut Variables, prog: &mut Program, func_def: FuncDef, func_map: &HashMap<String, Function>) {
     var_map.enter_scope();
     // Pattern match the FuncDef to extract details
     let FuncDef {
@@ -115,7 +115,7 @@ fn process_func(var_map: &mut Variables, prog: &mut Program, func_def: FuncDef) 
         var_map.insert(id.clone(), SymbolInfo::Var(ptr));
     }
 
-    let end_bb = process_block(block, func_data, entry, var_map);
+    let end_bb = process_block(block, func_data, entry, var_map, func_map);
     if !is_bb_terminated(func_data, &end_bb) {
         if is_void_return {
             let ret_inst = func_data.dfg_mut().new_value().ret(None);
@@ -137,9 +137,10 @@ fn process_block(
     func_data: &mut FunctionData,
     mut bb: BasicBlock,
     var_map: &mut Variables,
+    func_map: &HashMap<String, Function>,
 ) -> BasicBlock {
     for item in block.stmt {
-        bb = process_block_item(item, func_data, bb, var_map);
+        bb = process_block_item(item, func_data, bb, var_map, func_map);
         if is_bb_terminated(func_data, &bb) {
             break;
         }
@@ -152,6 +153,7 @@ fn process_block_item(
     func_data: &mut FunctionData,
     bb: BasicBlock,
     var_map: &mut Variables,
+    func_map: &HashMap<String, Function>,
 ) -> BasicBlock {
     match item {
         BlockItem::Decl(Decl::Const(decl)) => {
@@ -186,7 +188,7 @@ fn process_block_item(
                 if let Some(init_val) = def.init_val {
                     let val = init_val
                         .exp
-                        .process_to_ir(func_data, &mut current_bb, var_map);
+                        .process_to_ir(func_data, &mut current_bb, var_map, func_map);
                     let store_inst = func_data.dfg_mut().new_value().store(val, alloc_ptr);
                     func_data
                         .layout_mut()
@@ -199,7 +201,7 @@ fn process_block_item(
             }
             current_bb
         }
-        BlockItem::Stmt(stmt) => process_stmt(stmt, func_data, bb, var_map),
+        BlockItem::Stmt(stmt) => process_stmt(stmt, func_data, bb, var_map, func_map),
     }
 }
 
@@ -208,11 +210,12 @@ fn process_stmt(
     func_data: &mut FunctionData,
     bb: BasicBlock,
     var_map: &mut Variables,
+    func_map: &HashMap<String, Function>,
 ) -> BasicBlock {
     match stmt {
         Stmt::Assign { lval, exp } => {
             let mut current_bb = bb;
-            let val = exp.process_to_ir(func_data, &mut current_bb, var_map);
+            let val = exp.process_to_ir(func_data, &mut current_bb, var_map, func_map);
             if let Some(dest) = var_map.get(&lval) {
                 let store_inst = func_data.dfg_mut().new_value().store(val, dest);
                 func_data
@@ -230,7 +233,7 @@ fn process_stmt(
             let mut current_bb = bb;
             let mut ret_val: Option<Value> = None;
             if let Some(expr) = exp {
-                ret_val = Some(expr.process_to_ir(func_data, &mut current_bb, var_map));
+                ret_val = Some(expr.process_to_ir(func_data, &mut current_bb, var_map, func_map));
             }
             let ret_inst = func_data.dfg_mut().new_value().ret(ret_val);
             func_data
@@ -244,13 +247,13 @@ fn process_stmt(
         Stmt::Exp(exp) => {
             let mut current_bb = bb;
             if let Some(expr) = exp {
-                let _ = expr.process_to_ir(func_data, &mut current_bb, var_map);
+                let _ = expr.process_to_ir(func_data, &mut current_bb, var_map, func_map);
             }
             current_bb
         }
         Stmt::Block(blk) => {
             var_map.enter_scope();
-            let new_bb = process_block(blk, func_data, bb, var_map);
+            let new_bb = process_block(blk, func_data, bb, var_map, func_map);
             var_map.exit_scope();
             new_bb
         }
@@ -273,7 +276,7 @@ fn process_stmt(
             let mut current_bb = bb;
             let cond = if_stmt
                 .cond
-                .process_to_ir(func_data, &mut current_bb, var_map);
+                .process_to_ir(func_data, &mut current_bb, var_map, func_map);
             let br = func_data
                 .dfg_mut()
                 .new_value()
@@ -291,7 +294,7 @@ fn process_stmt(
                 .bbs_mut()
                 .push_key_back(then_bb)
                 .unwrap();
-            let then_end_bb = process_stmt(if_stmt.then_stmt, func_data, then_bb, var_map);
+            let then_end_bb = process_stmt(if_stmt.then_stmt, func_data, then_bb, var_map, func_map);
             if !is_bb_terminated(func_data, &then_end_bb) {
                 let jump_end = func_data.dfg_mut().new_value().jump(end_bb);
                 func_data
@@ -309,7 +312,7 @@ fn process_stmt(
                 .push_key_back(else_bb)
                 .unwrap();
             let else_end_bb = if let Some(else_stmt) = if_stmt.else_stmt {
-                process_stmt(else_stmt, func_data, else_bb, var_map)
+                process_stmt(else_stmt, func_data, else_bb, var_map, func_map)
             } else {
                 else_bb
             };
@@ -369,7 +372,7 @@ fn process_stmt(
             let mut curr_entry_bb = while_entry;
             let cond = while_stmt
                 .cond
-                .process_to_ir(func_data, &mut curr_entry_bb, var_map);
+                .process_to_ir(func_data, &mut curr_entry_bb, var_map, func_map);
             let br = func_data
                 .dfg_mut()
                 .new_value()
@@ -387,7 +390,7 @@ fn process_stmt(
                 .bbs_mut()
                 .push_key_back(while_body)
                 .unwrap();
-            let body_end_bb = process_stmt(while_stmt.body_while, func_data, while_body, var_map);
+            let body_end_bb = process_stmt(while_stmt.body_while, func_data, while_body, var_map, func_map);
             if !is_bb_terminated(func_data, &body_end_bb) {
                 let jump_back_stmt = func_data.dfg_mut().new_value().jump(while_entry);
                 func_data

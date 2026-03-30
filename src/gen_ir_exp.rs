@@ -23,9 +23,9 @@ impl ProcessIr for Exp {
     ) -> Value {
         match self {
             Exp::Number(val) => func_data.dfg_mut().new_value().integer(*val),
-            Exp::Unary { op, exp } => process_to_ir_unary(func_data, bb, op, exp, var_map),
+            Exp::Unary { op, exp } => process_to_ir_unary(func_data, bb, op, exp, var_map, func_map),
             Exp::Binary { op, lhs, rhs } => {
-                process_to_ir_binary(func_data, bb, op, lhs, rhs, var_map)
+                process_to_ir_binary(func_data, bb, op, lhs, rhs, var_map, func_map)
             }
             Exp::Var(variable) => process_to_ir_variable(func_data, bb, variable, var_map),
             Exp::Call { ident, args } => process_to_ir_call(func_data, bb, var_map, func_map, ident, args),
@@ -75,8 +75,9 @@ fn process_to_ir_unary(
     op: &crate::ast::UnaryOp,
     exp: &Box<Exp>,
     var_map: &mut Variables,
+    func_map: &HashMap<String, Function>,
 ) -> Value {
-    let val = exp.process_to_ir(func_data, bb, var_map);
+    let val = exp.process_to_ir(func_data, bb, var_map, func_map);
     match op {
         crate::ast::UnaryOp::Plus => val,
         crate::ast::UnaryOp::Minus => {
@@ -117,6 +118,7 @@ fn process_to_ir_binary(
     lhs: &Box<Exp>,
     rhs: &Box<Exp>,
     var_map: &mut Variables,
+    func_map: &HashMap<String, Function>,
 ) -> Value {
     match op {
         crate::ast::BinaryOp::Land => {
@@ -138,7 +140,7 @@ fn process_to_ir_binary(
                 .push_key_back(result_ptr)
                 .unwrap();
 
-            let lhs_val = lhs.process_to_ir(func_data, bb, var_map);
+            let lhs_val = lhs.process_to_ir(func_data, bb, var_map, func_map);
             let zero = func_data.dfg_mut().new_value().integer(0);
             let lhs_bool = func_data
                 .dfg_mut()
@@ -177,7 +179,7 @@ fn process_to_ir_binary(
                 .unwrap();
             *bb = rhs_bb;
 
-            let rhs_val = rhs.process_to_ir(func_data, bb, var_map);
+            let rhs_val = rhs.process_to_ir(func_data, bb, var_map, func_map);
             let rhs_bool = func_data
                 .dfg_mut()
                 .new_value()
@@ -240,7 +242,7 @@ fn process_to_ir_binary(
                 .push_key_back(result_ptr)
                 .unwrap();
 
-            let lhs_val = lhs.process_to_ir(func_data, bb, var_map);
+            let lhs_val = lhs.process_to_ir(func_data, bb, var_map, func_map);
             let zero = func_data.dfg_mut().new_value().integer(0);
             let one = func_data.dfg_mut().new_value().integer(1);
             let lhs_bool = func_data
@@ -280,7 +282,7 @@ fn process_to_ir_binary(
                 .unwrap();
             *bb = rhs_bb;
 
-            let rhs_val = rhs.process_to_ir(func_data, bb, var_map);
+            let rhs_val = rhs.process_to_ir(func_data, bb, var_map, func_map);
             let rhs_bool = func_data
                 .dfg_mut()
                 .new_value()
@@ -325,8 +327,8 @@ fn process_to_ir_binary(
             load_res
         }
         _ => {
-            let lhs_val = lhs.process_to_ir(func_data, bb, var_map);
-            let rhs_val = rhs.process_to_ir(func_data, bb, var_map);
+            let lhs_val = lhs.process_to_ir(func_data, bb, var_map, func_map);
+            let rhs_val = rhs.process_to_ir(func_data, bb, var_map, func_map);
             let ir_op = match op {
                 crate::ast::BinaryOp::Add => BinaryOp::Add,
                 crate::ast::BinaryOp::Sub => BinaryOp::Sub,
