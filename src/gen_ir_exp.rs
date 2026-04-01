@@ -65,8 +65,25 @@ fn process_to_ir_call(
     ident: &String,
     args: &Vec<Exp>,
 ) -> Value {
-    for arg in args {}
-    unimplemented!()
+    let mut args_values = Vec::with_capacity(args.len());
+    for arg in args {
+        let value = arg.process_to_ir(func_data, bb, var_map, func_map);
+        args_values.push(value);
+    }
+
+    let callee = *func_map
+        .get(ident)
+        .unwrap_or_else(|| panic!("Undefined function: {}", ident));
+
+    let call_inst = func_data.dfg_mut().new_value().call(callee, args_values);
+    func_data
+        .layout_mut()
+        .bb_mut(*bb)
+        .insts_mut()
+        .push_key_back(call_inst)
+        .unwrap();
+
+    call_inst
 }
 
 fn process_to_ir_unary(

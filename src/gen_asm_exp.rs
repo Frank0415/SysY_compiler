@@ -1,7 +1,8 @@
 use crate::reg_alloc::{LinearScanAlloc, VariableLocation};
 use koopa::ir::dfg::DataFlowGraph;
-use koopa::ir::values::{Binary, Branch, Jump, Load, Store};
-use koopa::ir::{Value, ValueKind};
+use koopa::ir::values::{Binary, Branch, Call, Jump, Load, Store};
+use koopa::ir::{Function, Value, ValueKind};
+use std::collections::HashMap;
 
 struct LoadedBinaryOperands {
     asm: String,
@@ -204,6 +205,73 @@ pub fn process_inst(
     asm += &format!("\t{}\t{}, {}, {}\n", inst, target, leftreg, rightreg);
     release_scratch_regs(reg_alloc, loaded.borrowed_scratch);
     asm
+}
+
+pub fn process_call_inst(
+    call: &Call,
+    inst: &koopa::ir::Value,
+    dfg: &DataFlowGraph,
+    reg_alloc: &LinearScanAlloc,
+    func_names: &HashMap<Function, String>,
+) -> String {
+    let mut ret = String::new();
+
+    for (idx, arg) in call.args().iter().enumerate() {
+        if idx < 8 {
+            let a_reg = format!("a{}", idx);
+            if let ValueKind::Integer(int) = dfg.value(*arg).kind() {
+                ret += &format!("\tli {}, {}\n", a_reg, int.value());
+            } else {
+                match reg_alloc.get_variable(arg) {
+                    VariableLocation::Register(reg) => {
+                        ret += &format!("\tmv {}, {}\n", a_reg, reg);
+                    }
+                    VariableLocation::Stack(offset) => {
+                        ret += &format!("\tlw {}, {}(sp)\n", a_reg, offset);
+                    }
+                    VariableLocation::None => panic!("Call arg has no location: {:?}", arg),
+                }
+            }
+        } else {
+            let stack_off = (idx - 8) * 4;
+            if let ValueKind::Integer(int) = dfg.value(*arg).kind() {
+                let scratch = reg_alloc.acquire_scratch();
+                ret += &format!("\tli {}, {}\n", scratch, int.value());
+                ret += &format!("\tsw {}, {}(sp)\n", scratch, stack_off);
+                reg_alloc.release_scratch(scratch);
+            } else {
+                match reg_alloc.get_variable(arg) {
+                    VariableLocation::Register(reg) => {
+                        ret += &format!("\tsw {}, {}(sp)\n", reg, stack_off);
+                    }
+                    VariableLocation::Stack(offset) => {
+                        let scratch = reg_alloc.acquire_scratch();
+                        ret += &format!("\tlw {}, {}(sp)\n", scratch, offset);
+                        ret += &format!("\tsw {}, {}(sp)\n", scratch, stack_off);
+                        reg_alloc.release_scratch(scratch);
+                    }
+                    VariableLocation::None => panic!("Call arg has no location: {:?}", arg),
+                }
+            }
+        }
+    }
+
+    let callee_name = func_names
+        .get(&call.callee())
+        .expect("Call callee function name should exist");
+    ret += &format!("\tcall {}\n", callee_name);
+
+    match reg_alloc.get_variable(inst) {
+        VariableLocation::Register(reg) => {
+            ret += &format!("\tmv {}, a0\n", reg);
+        }
+        VariableLocation::Stack(offset) => {
+            ret += &format!("\tsw a0, {}(sp)\n", offset);
+        }
+        VariableLocation::None => {}
+    }
+
+    ret
 }
 
 fn load_temp_int(
