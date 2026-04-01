@@ -20,7 +20,11 @@ fn load_stack_to_scratch(offset: usize, scratch: &str) -> String {
     format!("\tlw {}, {}(sp)\n", scratch, offset)
 }
 
-fn load_variable_stack_to_scratch(value: &Value, reg_alloc: &LinearScanAlloc, scratch: &str) -> String {
+fn load_variable_stack_to_scratch(
+    value: &Value,
+    reg_alloc: &LinearScanAlloc,
+    scratch: &str,
+) -> String {
     match reg_alloc.get_variable(value) {
         VariableLocation::Stack(offset) => load_stack_to_scratch(offset, scratch),
         _ => panic!("Value {:?} is not in stack", value),
@@ -292,17 +296,33 @@ pub fn process_store_inst(
             reg_alloc.release_scratch(scratch);
         }
     } else {
-        match reg_alloc.get_variable(&val) {
-            VariableLocation::Register(reg) => {
-                ret += &format!("\tsw {}, {}(sp)\n", reg, dest_offset);
+        match dfg.value(val).kind() {
+            ValueKind::FuncArgRef(arg_ref) => {
+                let idx = arg_ref.index();
+                if idx < 8 {
+                    ret += &format!("\tsw a{}, {}(sp)\n", idx, dest_offset);
+                } else {
+                    // Extra args are in caller area: old_sp + (idx - 8) * 4.
+                    // old_sp = current_sp + callee_stack_size.
+                    let caller_arg_offset = reg_alloc.get_stack_count() + (idx - 8) * 4;
+                    let scratch = reg_alloc.acquire_scratch();
+                    ret += &format!("\tlw {}, {}(sp)\n", scratch, caller_arg_offset);
+                    ret += &format!("\tsw {}, {}(sp)\n", scratch, dest_offset);
+                    reg_alloc.release_scratch(scratch);
+                }
             }
-            VariableLocation::Stack(_) => {
-                let scratch = reg_alloc.acquire_scratch();
-                ret += &load_variable_stack_to_scratch(&val, reg_alloc, &scratch);
-                ret += &format!("\tsw {}, {}(sp)\n", scratch, dest_offset);
-                reg_alloc.release_scratch(scratch);
-            }
-            VariableLocation::None => panic!("Store value has neither register nor stack slot"),
+            _ => match reg_alloc.get_variable(&val) {
+                VariableLocation::Register(reg) => {
+                    ret += &format!("\tsw {}, {}(sp)\n", reg, dest_offset);
+                }
+                VariableLocation::Stack(_) => {
+                    let scratch = reg_alloc.acquire_scratch();
+                    ret += &load_variable_stack_to_scratch(&val, reg_alloc, &scratch);
+                    ret += &format!("\tsw {}, {}(sp)\n", scratch, dest_offset);
+                    reg_alloc.release_scratch(scratch);
+                }
+                VariableLocation::None => panic!("Store value has neither register nor stack slot"),
+            },
         }
     }
 
@@ -333,11 +353,7 @@ pub fn process_branch_inst(
     ret
 }
 
-pub fn process_jump_inst(
-    jump: &Jump,
-    dfg: &DataFlowGraph,
-    _reg_alloc: &LinearScanAlloc,
-) -> String {
+pub fn process_jump_inst(jump: &Jump, dfg: &DataFlowGraph, _reg_alloc: &LinearScanAlloc) -> String {
     let jump_target = &dfg.bb(jump.target()).name().as_ref().unwrap()[1..];
     format!("\tj {}\n", jump_target)
 }
