@@ -32,6 +32,9 @@ impl GenAsm for Program {
             func_names.insert(func, name.to_string());
         }
         for &func in self.func_layout() {
+            if self.func(func).layout().entry_bb().is_none() {
+                continue;
+            }
             str += &gen_func_asm(self.func(func), &func_names).unwrap();
         }
         Ok(str)

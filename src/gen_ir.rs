@@ -16,6 +16,8 @@ pub fn gen_ir(cu: CompUnit) -> Result<Program, Error> {
     let mut program = Program::new();
     let mut function_maps: HashMap<String, Function> = HashMap::new();
 
+    add_sysy_lib_decls(&mut variable_maps, &mut program, &mut function_maps);
+
     // pass1: 先把所有函数原型建出来，拿到 Function 句柄
     for item in &cu.items {
         if let CompUnitItem::FuncDef(fd) = item {
@@ -57,6 +59,52 @@ pub fn gen_ir(cu: CompUnit) -> Result<Program, Error> {
     }
 
     Ok(program)
+}
+
+fn add_sysy_lib_decls(
+    var_map: &mut Variables,
+    program: &mut Program,
+    function_maps: &mut HashMap<String, Function>,
+) {
+    let i32_ty = Type::get_i32();
+    let ptr_i32_ty = Type::get_pointer(Type::get_i32());
+    let unit_ty = Type::get_unit();
+
+    let lib_funcs: Vec<(&str, Vec<Type>, Type)> = vec![
+        ("getint", vec![], i32_ty.clone()),
+        ("getch", vec![], i32_ty.clone()),
+        ("getarray", vec![ptr_i32_ty.clone()], i32_ty),
+        ("putint", vec![Type::get_i32()], unit_ty.clone()),
+        ("putch", vec![Type::get_i32()], unit_ty.clone()),
+        (
+            "putarray",
+            vec![Type::get_i32(), ptr_i32_ty],
+            unit_ty.clone(),
+        ),
+        ("starttime", vec![], unit_ty.clone()),
+        ("stoptime", vec![], unit_ty),
+    ];
+
+    for (name, params, ret_ty) in lib_funcs {
+        assert!(
+            !var_map.contains_in_current_scope(name),
+            "duplicate global symbol: {}",
+            name
+        );
+        let param_defs: Vec<(Option<String>, Type)> =
+            params.into_iter().map(|t| (None, t)).collect();
+        let func = program.new_func(FunctionData::with_param_names(
+            format!("@{}", name),
+            param_defs,
+            ret_ty,
+        ));
+        assert!(
+            function_maps.insert(name.to_string(), func).is_none(),
+            "duplicate function definition: {}",
+            name
+        );
+        var_map.insert(name.to_string(), SymbolInfo::Func);
+    }
 }
 
 fn process_func(var_map: &mut Variables, prog: &mut Program, func_def: FuncDef, func_map: &HashMap<String, Function>) {
