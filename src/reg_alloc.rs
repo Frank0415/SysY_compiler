@@ -54,6 +54,9 @@ pub struct LinearScanAlloc {
     // Spill 到栈的映射：Value -> 栈偏移
     stack_slots: HashMap<Value, usize>,
     stack_count: usize,
+    ra_offset: Option<usize>,
+    outgoing_arg_area: usize,
+    has_call: bool,
     // 预留的临时寄存器（给 CodeGen 用，不参与分配）
     scratch_regs: RefCell<Vec<String>>,
 }
@@ -70,7 +73,15 @@ impl LinearScanAlloc {
             allocation: HashMap::new(),
             stack_slots: HashMap::new(),
             stack_count: 0,
-            scratch_regs: RefCell::new(vec!["t5".to_string(), "t6".to_string()]),
+            ra_offset: None,
+            outgoing_arg_area: 0,
+            has_call: false,
+            scratch_regs: RefCell::new(vec![
+                "t3".to_string(),
+                "t4".to_string(),
+                "t5".to_string(),
+                "t6".to_string(),
+            ]),
         }
     }
 
@@ -137,7 +148,7 @@ impl LinearScanAlloc {
         let (mut intervals, stack_maps) = self.build_intervals(func);
         intervals.sort_by_key(|i| i.start); // 按 start 升序排序
         let mut active: BinaryHeap<ActiveInterval> = BinaryHeap::new();
-        let mut stack_slots: Vec<Value> = Vec::new();
+        let mut spilled_values: Vec<Value> = Vec::new();
 
         for current in intervals {
             println!(
@@ -169,10 +180,10 @@ impl LinearScanAlloc {
                     reg,
                 });
             } else {
-                stack_slots.push(current.value);
+                spilled_values.push(current.value);
                 println!(
                     "No free registers found, stack size {} assigned to value {:?}, ",
-                    stack_slots.len() * 4,
+                    spilled_values.len() * 4,
                     current.value
                 );
             }
@@ -212,23 +223,43 @@ impl LinearScanAlloc {
 
         // 3.分配stack
         for (stack, _place) in stack_maps.iter() {
-            stack_slots.push(*stack);
+            spilled_values.push(*stack);
             println!(
                 "Assigned stack size {} assigned to value {:?}",
-                stack_slots.len() * 4,
+                spilled_values.len() * 4,
                 stack
             );
         }
 
-        let raw_stack_size = stack_slots.len() * 4;
-        // RISC-V ABI: keep stack frame 16-byte aligned.
+        let mut max_call_args = 0usize;
+        for (_bb, node) in func.layout().bbs() {
+            for &inst in node.insts().keys() {
+                if let ValueKind::Call(call) = func.dfg().value(inst).kind() {
+                    self.has_call = true;
+                    max_call_args = max_call_args.max(call.args().len());
+                }
+            }
+        }
+
+        self.outgoing_arg_area = max_call_args.saturating_sub(8) * 4;
+        let rr = if self.has_call { 4 } else { 0 };
+        let local_bytes = spilled_values.len() * 4;
+
+        let raw_stack_size = self.outgoing_arg_area + local_bytes + rr;
         self.stack_count = if raw_stack_size == 0 {
             0
         } else {
             ((raw_stack_size + 15) / 16) * 16
         };
-        for (idx, stack) in stack_slots.iter().enumerate() {
-            self.stack_slots.insert(*stack, self.stack_count - idx * 4);
+        self.ra_offset = if self.has_call {
+            Some(self.stack_count - 4)
+        } else {
+            None
+        };
+
+        for (idx, stack) in spilled_values.iter().enumerate() {
+            self.stack_slots
+                .insert(*stack, self.outgoing_arg_area + idx * 4);
         }
     }
 
@@ -245,6 +276,18 @@ impl LinearScanAlloc {
 
     pub fn get_stack_count(&self) -> usize {
         self.stack_count
+    }
+
+    pub fn get_ra_offset(&self) -> Option<usize> {
+        self.ra_offset
+    }
+
+    pub fn get_outgoing_arg_area(&self) -> usize {
+        self.outgoing_arg_area
+    }
+
+    pub fn has_call(&self) -> bool {
+        self.has_call
     }
 
     fn get_operands(&self, data: &koopa::ir::entities::ValueData, inst: &Value) -> OpResults {
@@ -281,8 +324,8 @@ impl LinearScanAlloc {
     pub fn get_variable(&self, value: &Value) -> VariableLocation {
         if let Some(reg) = self.allocation.get(value) {
             VariableLocation::Register(reg.clone())
-        } else if let Some(size) = self.stack_slots.get(value) {
-            VariableLocation::Stack(size - 4)
+        } else if let Some(offset) = self.stack_slots.get(value) {
+            VariableLocation::Stack(*offset)
         } else {
             VariableLocation::None
         }

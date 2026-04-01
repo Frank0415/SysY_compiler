@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use crate::ast::Exp;
 use crate::gen_ir_variables::Variables;
 use koopa::ir::{builder_traits::*, *};
+use std::collections::HashMap;
 
 pub trait ProcessIr {
     fn process_to_ir(
@@ -23,12 +23,16 @@ impl ProcessIr for Exp {
     ) -> Value {
         match self {
             Exp::Number(val) => func_data.dfg_mut().new_value().integer(*val),
-            Exp::Unary { op, exp } => process_to_ir_unary(func_data, bb, op, exp, var_map, func_map),
+            Exp::Unary { op, exp } => {
+                process_to_ir_unary(func_data, bb, op, exp, var_map, func_map)
+            }
             Exp::Binary { op, lhs, rhs } => {
                 process_to_ir_binary(func_data, bb, op, lhs, rhs, var_map, func_map)
             }
             Exp::Var(variable) => process_to_ir_variable(func_data, bb, variable, var_map),
-            Exp::Call { ident, args } => process_to_ir_call(func_data, bb, var_map, func_map, ident, args),
+            Exp::Call { ident, args } => {
+                process_to_ir_call(func_data, bb, var_map, func_map, ident, args)
+            }
         }
     }
 }

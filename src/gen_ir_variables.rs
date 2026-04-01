@@ -6,6 +6,7 @@ use std::collections::HashMap;
 pub enum SymbolInfo {
     Const(i32),
     Var(Value),
+    Func,
     None,
 }
 
@@ -57,6 +58,13 @@ impl Variables {
     pub fn contains_in_current_scope(&self, name: &str) -> bool {
         self.scopes
             .last()
+            .and_then(|scope| scope.get(name))
+            .is_some()
+    }
+
+    pub fn contains_in_global_scope(&self, name: &str) -> bool {
+        self.scopes
+            .first()
             .and_then(|scope| scope.get(name))
             .is_some()
     }

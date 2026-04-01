@@ -1,11 +1,10 @@
 use crate::ast::Decl;
 use crate::ast::{
-    Block, BlockItem, CompUnit, CompUnitItem, EvalExp, FuncDef, FuncFParam, RawType, Stmt,
+    Block, BlockItem, CompUnit, CompUnitItem, EvalExp, FuncDef, RawType, Stmt,
 };
 use crate::gen_ir_exp::ProcessIr;
 use crate::gen_ir_variables::{SymbolInfo, Variables};
 use koopa::ir::{builder_traits::*, types::*, *};
-use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Error;
 /*
@@ -13,6 +12,7 @@ use std::fmt::Error;
 */
 pub fn gen_ir(cu: CompUnit) -> Result<Program, Error> {
     let mut variable_maps = Variables::new();
+    variable_maps.enter_scope();
     let mut program = Program::new();
     let mut function_maps: HashMap<String, Function> = HashMap::new();
 
@@ -34,6 +34,12 @@ pub fn gen_ir(cu: CompUnit) -> Result<Program, Error> {
                 "duplicate function definition: {}",
                 fd.ident
             );
+            assert!(
+                !variable_maps.contains_in_current_scope(&fd.ident),
+                "duplicate global symbol: {}",
+                fd.ident
+            );
+            variable_maps.insert(fd.ident.clone(), SymbolInfo::Func);
         }
     }
 
@@ -60,25 +66,20 @@ fn process_func(var_map: &mut Variables, prog: &mut Program, func_def: FuncDef, 
         ident,
         func_params,
         block,
-        func_type,
+                                                   func_type,
     } = func_def;
 
     let param_defs: Vec<(String, RawType)> =
         func_params.into_iter().map(|p| (p.id, p.bt)).collect();
 
-    let params: Vec<(Option<String>, Type)> = param_defs
-        .iter()
-        .map(|(id, bt)| (Some(format!("%{}", id)), type_to_ir(bt)))
-        .collect();
-
-    let func_name = format!("@{}", ident);
+    let func = *func_map
+        .get(&ident)
+        .unwrap_or_else(|| panic!("Undefined function: {}", ident));
     let ret_ty = type_to_ir(&func_type);
     let is_void_return = ret_ty.is_unit();
-    let func = prog.new_func(FunctionData::with_param_names(func_name, params, ret_ty));
     let func_data = prog.func_mut(func);
 
     // Variable maps
-    let p: Vec<Value> = func_data.params().to_vec();
     let incoming: Vec<Value> = func_data.params().to_vec();
 
     let entry = func_data
@@ -93,8 +94,8 @@ fn process_func(var_map: &mut Variables, prog: &mut Program, func_def: FuncDef, 
 
     for (i, (id, bt)) in param_defs.iter().enumerate() {
         assert!(
-            !var_map.contains_in_current_scope(id),
-            "duplicate parameter name in function scope"
+            !var_map.contains_in_current_scope(id) && !var_map.contains_in_global_scope(id),
+            "duplicate parameter/global symbol name in function scope"
         );
         let ptr = func_data.dfg_mut().new_value().alloc(type_to_ir(bt));
         func_data
@@ -160,6 +161,10 @@ fn process_block_item(
             let _typ = type_to_ir(&decl.typ);
             for def in decl.defs {
                 let id = def.ident;
+                assert!(
+                    !var_map.contains_in_current_scope(&id) && !var_map.contains_in_global_scope(&id),
+                    "Should not declare a constant multiple times in the same scope or conflict with globals!"
+                );
                 let val = def.init_val.exp.eval_exp(var_map);
                 var_map.insert(id, SymbolInfo::Const(val));
             }
@@ -171,8 +176,8 @@ fn process_block_item(
             for def in decl.defs {
                 let id = def.ident;
                 assert!(
-                    !var_map.contains_in_current_scope(&id),
-                    "Should not declare a variable multiple times in the same scope!"
+                    !var_map.contains_in_current_scope(&id) && !var_map.contains_in_global_scope(&id),
+                    "Should not declare a variable multiple times in the same scope or conflict with globals!"
                 );
                 let alloc_ptr = func_data.dfg_mut().new_value().alloc(typ.clone());
                 let unique_id = var_map.get_id();
