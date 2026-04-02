@@ -1,4 +1,4 @@
-use compiler::ast::{Block, Stmt, Exp};
+use compiler::ast::CompUnitItem;
 use compiler::sysy;
 use std::fs;
 
@@ -10,8 +10,12 @@ fn test_case_1() {
     let parser = sysy::CompUnitParser::new();
     let ast = parser.parse(&input).expect("Failed to parse input");
 
-    // Basic verification that it's a valid AST
-    assert_eq!(ast.func_def.ident, "main");
+    // Basic verification that parser produced a top-level main function.
+    let has_main = ast
+        .items
+        .iter()
+        .any(|item| matches!(item, CompUnitItem::FuncDef(fd) if fd.ident == "main"));
+    assert!(has_main, "Expected a top-level main function");
 
     // let expected_block = Block {
     //     stmt: vec![Stmt::Return(Exp::Number(0))],
