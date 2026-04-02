@@ -50,15 +50,51 @@ pub fn gen_ir(cu: CompUnit) -> Result<Program, Error> {
             CompUnitItem::FuncDef(func_def) => {
                 process_func(&mut variable_maps, &mut program, func_def, &function_maps);
             }
-            CompUnitItem::Decl(_decl) => {
-                unimplemented!();
-                // TODO: Implement global declarations
-                // For now, parsing is supported but IR generation is a placeholder
+            CompUnitItem::Decl(decl) => {
+                process_global_decl(&mut variable_maps, &mut program, decl);
             }
         }
     }
 
     Ok(program)
+}
+
+fn process_global_decl(var_map: &mut Variables, program: &mut Program, decl: Decl) {
+    match decl {
+        Decl::Const(const_decl) => {
+            for def in const_decl.defs {
+                assert!(
+                    !var_map.contains_in_current_scope(&def.ident),
+                    "duplicate global symbol: {}",
+                    def.ident
+                );
+                let val = def.init_val.exp.eval_exp(var_map);
+                var_map.insert(def.ident, SymbolInfo::Const(val));
+            }
+        }
+        Decl::Var(var_decl) => {
+            let ty = type_to_ir(&var_decl.typ);
+            assert!(!ty.is_unit(), "global variable type cannot be void");
+            for def in var_decl.defs {
+                assert!(
+                    !var_map.contains_in_current_scope(&def.ident),
+                    "duplicate global symbol: {}",
+                    def.ident
+                );
+
+                let init = if let Some(init_val) = def.init_val {
+                    let val = init_val.exp.eval_exp(var_map);
+                    program.new_value().integer(val)
+                } else {
+                    program.new_value().zero_init(ty.clone())
+                };
+
+                let global_alloc = program.new_value().global_alloc(init);
+                program.set_value_name(global_alloc, Some(format!("@{}", def.ident)));
+                var_map.insert(def.ident, SymbolInfo::Var(global_alloc));
+            }
+        }
+    }
 }
 
 fn add_sysy_lib_decls(
@@ -142,8 +178,8 @@ fn process_func(var_map: &mut Variables, prog: &mut Program, func_def: FuncDef, 
 
     for (i, (id, bt)) in param_defs.iter().enumerate() {
         assert!(
-            !var_map.contains_in_current_scope(id) && !var_map.contains_in_global_scope(id),
-            "duplicate parameter/global symbol name in function scope"
+            !var_map.contains_in_current_scope(id),
+            "duplicate parameter name in function scope"
         );
         let ptr = func_data.dfg_mut().new_value().alloc(type_to_ir(bt));
         func_data
@@ -210,8 +246,8 @@ fn process_block_item(
             for def in decl.defs {
                 let id = def.ident;
                 assert!(
-                    !var_map.contains_in_current_scope(&id) && !var_map.contains_in_global_scope(&id),
-                    "Should not declare a constant multiple times in the same scope or conflict with globals!"
+                    !var_map.contains_in_current_scope(&id),
+                    "Should not declare a constant multiple times in the same scope!"
                 );
                 let val = def.init_val.exp.eval_exp(var_map);
                 var_map.insert(id, SymbolInfo::Const(val));
@@ -224,8 +260,8 @@ fn process_block_item(
             for def in decl.defs {
                 let id = def.ident;
                 assert!(
-                    !var_map.contains_in_current_scope(&id) && !var_map.contains_in_global_scope(&id),
-                    "Should not declare a variable multiple times in the same scope or conflict with globals!"
+                    !var_map.contains_in_current_scope(&id),
+                    "Should not declare a variable multiple times in the same scope!"
                 );
                 let alloc_ptr = func_data.dfg_mut().new_value().alloc(typ.clone());
                 let unique_id = var_map.get_id();

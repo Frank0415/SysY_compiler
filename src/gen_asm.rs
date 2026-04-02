@@ -18,6 +18,7 @@ trait LocalGenAsm {
         dfg: &DataFlowGraph,
         reg_alloc: &LinearScanAlloc,
         func_names: &HashMap<Function, String>,
+        global_names: &HashMap<Value, String>,
     ) -> String;
 }
 
@@ -25,17 +26,59 @@ trait LocalGenAsm {
 impl GenAsm for Program {
     fn gen_asm(&self) -> Result<String, Error> {
         let mut str = String::new();
+
+        let mut global_str = String::new();
+        for global_value in self.inst_layout() {
+            let global_data = self.borrow_value(*global_value);
+            let global_name = global_data
+                .name()
+                .as_ref()
+                .expect("Global value should have a name");
+            let global_name = &global_name[1..];
+
+            let init = match global_data.kind() {
+                ValueKind::GlobalAlloc(ga) => ga.init(),
+                _ => continue,
+            };
+            let init_data = self.borrow_value(init);
+
+            global_str += &format!("\t.globl {}\n", global_name);
+            global_str += &format!("{}:\n", global_name);
+            match init_data.kind() {
+                ValueKind::ZeroInit(_) => {
+                    global_str += "\t.zero 4\n";
+                }
+                ValueKind::Integer(int) => {
+                    global_str += &format!("\t.word {}\n", int.value());
+                }
+                _ => unimplemented!("Unsupported global initializer kind"),
+            }
+        }
+
+        if !global_str.is_empty() {
+            str += "\t.data\n";
+            str += &global_str;
+            str += "\n";
+        }
+
         str += "\t.text\n";
         let mut func_names: HashMap<Function, String> = HashMap::new();
+        let mut global_names: HashMap<Value, String> = HashMap::new();
         for &func in self.func_layout() {
             let name = &self.func(func).name()[1..];
             func_names.insert(func, name.to_string());
+        }
+        for global_value in self.inst_layout() {
+            let global_data = self.borrow_value(*global_value);
+            if let Some(name) = global_data.name().as_ref() {
+                global_names.insert(*global_value, name[1..].to_string());
+            }
         }
         for &func in self.func_layout() {
             if self.func(func).layout().entry_bb().is_none() {
                 continue;
             }
-            str += &gen_func_asm(self.func(func), &func_names).unwrap();
+            str += &gen_func_asm(self.func(func), &func_names, &global_names).unwrap();
         }
         Ok(str)
     }
@@ -44,6 +87,7 @@ impl GenAsm for Program {
 fn gen_func_asm(
     func_data: &FunctionData,
     func_names: &HashMap<Function, String>,
+    global_names: &HashMap<Value, String>,
 ) -> Result<String, Error> {
     let name = &func_data.name()[1..];
     let mut str = String::new();
@@ -68,7 +112,7 @@ fn gen_func_asm(
             str += &func_data
                 .dfg()
                 .value(inst)
-                .translate_inst(&inst, func_data.dfg(), &reg_alloc, func_names);
+                .translate_inst(&inst, func_data.dfg(), &reg_alloc, func_names, global_names);
         }
     }
     Ok(str)
@@ -81,6 +125,7 @@ impl LocalGenAsm for ValueData {
         dfg: &DataFlowGraph,
         reg_alloc: &LinearScanAlloc,
         func_names: &HashMap<Function, String>,
+        global_names: &HashMap<Value, String>,
     ) -> String {
         println!("Translating instruction: {:?}", self.kind());
         self.used_by();
@@ -152,8 +197,8 @@ impl LocalGenAsm for ValueData {
                 asm
             }
             ValueKind::Alloc(_alloc) => process_alloc_inst(),
-            ValueKind::Load(load) => process_load_inst(load, value, dfg, reg_alloc),
-            ValueKind::Store(store) => process_store_inst(store, dfg, reg_alloc),
+            ValueKind::Load(load) => process_load_inst(load, value, dfg, reg_alloc, global_names),
+            ValueKind::Store(store) => process_store_inst(store, dfg, reg_alloc, global_names),
             ValueKind::Call(call) => process_call_inst(call, value, dfg, reg_alloc, func_names),
             ValueKind::Branch(branch) => process_branch_inst(branch, dfg, reg_alloc),
             ValueKind::Jump(jmp) => process_jump_inst(jmp, dfg, reg_alloc),
