@@ -90,7 +90,10 @@ fn process_global_decl(var_map: &mut Variables, program: &mut Program, decl: Dec
                 );
 
                 let alloc_init = if !def.array_lens.is_empty() {
-                    assert!(def.array_lens.len() == 1, "multi-dimensional arrays are not implemented in IR yet");
+                    assert!(
+                        def.array_lens.len() == 1,
+                        "multi-dimensional arrays are not implemented in IR yet"
+                    );
                     let len = def.array_lens[0].exp.eval_exp(var_map);
                     assert!(len > 0, "array length must be positive");
                     let arr_ty = Type::get_array(base_ty.clone(), len as usize);
@@ -102,7 +105,9 @@ fn process_global_decl(var_map: &mut Variables, program: &mut Program, decl: Dec
                                     let v = match &items[i] {
                                         crate::ast::InitVal::Exp(exp) => exp.eval_exp(var_map),
                                         crate::ast::InitVal::List(_) => {
-                                            panic!("multi-dimensional array initializer is not implemented in IR yet")
+                                            panic!(
+                                                "multi-dimensional array initializer is not implemented in IR yet"
+                                            )
                                         }
                                     };
                                     elems.push(program.new_value().integer(v));
@@ -317,7 +322,10 @@ fn process_block_item(
                     "Should not declare a variable multiple times in the same scope!"
                 );
                 let alloc_ty = if !def.array_lens.is_empty() {
-                    assert!(def.array_lens.len() == 1, "multi-dimensional arrays are not implemented in IR yet");
+                    assert!(
+                        def.array_lens.len() == 1,
+                        "multi-dimensional arrays are not implemented in IR yet"
+                    );
                     let len = def.array_lens[0].exp.eval_exp(var_map);
                     assert!(len > 0, "array length must be positive");
                     Type::get_array(base_ty.clone(), len as usize)
@@ -340,7 +348,10 @@ fn process_block_item(
                 if let Some(init_val) = def.init_val {
                     match (def.array_lens, init_val) {
                         (lens, crate::ast::InitVal::List(items)) if !lens.is_empty() => {
-                            assert!(lens.len() == 1, "multi-dimensional arrays are not implemented in IR yet");
+                            assert!(
+                                lens.len() == 1,
+                                "multi-dimensional arrays are not implemented in IR yet"
+                            );
                             let len = lens[0].exp.eval_exp(var_map);
                             for i in 0..(len as usize) {
                                 let idx_val = func_data.dfg_mut().new_value().integer(i as i32);
@@ -364,7 +375,9 @@ fn process_block_item(
                                             func_map,
                                         ),
                                         crate::ast::InitVal::List(_) => {
-                                            panic!("multi-dimensional array initializer is not implemented in IR yet")
+                                            panic!(
+                                                "multi-dimensional array initializer is not implemented in IR yet"
+                                            )
                                         }
                                     }
                                 } else {
@@ -420,9 +433,16 @@ fn process_stmt(
             let val = exp.process_to_ir(func_data, &mut current_bb, var_map, func_map);
             if let Some(dest_base) = var_map.get(&lval.ident) {
                 let dest = if !lval.indices.is_empty() {
-                    assert!(lval.indices.len() == 1, "multi-dimensional arrays are not implemented in IR yet");
-                    let index_val =
-                        lval.indices[0].process_to_ir(func_data, &mut current_bb, var_map, func_map);
+                    assert!(
+                        lval.indices.len() == 1,
+                        "multi-dimensional arrays are not implemented in IR yet"
+                    );
+                    let index_val = lval.indices[0].process_to_ir(
+                        func_data,
+                        &mut current_bb,
+                        var_map,
+                        func_map,
+                    );
                     let elem_ptr = func_data
                         .dfg_mut()
                         .new_value()

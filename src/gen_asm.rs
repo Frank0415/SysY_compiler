@@ -155,10 +155,13 @@ fn gen_func_asm(
             str += &format!("{}:\n", bb_name);
         }
         for &inst in node.insts().keys() {
-            str += &func_data
-                .dfg()
-                .value(inst)
-                .translate_inst(&inst, func_data.dfg(), &reg_alloc, func_names, global_names);
+            str += &func_data.dfg().value(inst).translate_inst(
+                &inst,
+                func_data.dfg(),
+                &reg_alloc,
+                func_names,
+                global_names,
+            );
         }
     }
     Ok(str)
@@ -212,18 +215,36 @@ impl LocalGenAsm for ValueData {
                     VariableLocation::None => panic!("Binary result has no location"),
                 };
                 let mut asm = match bin.op() {
-                    koopa::ir::BinaryOp::Add => process_inst(bin, dfg, reg_alloc, target.clone(), "add"),
-                    koopa::ir::BinaryOp::Sub => process_inst(bin, dfg, reg_alloc, target.clone(), "sub"),
-                    koopa::ir::BinaryOp::Mul => process_inst(bin, dfg, reg_alloc, target.clone(), "mul"),
-                    koopa::ir::BinaryOp::Div => process_inst(bin, dfg, reg_alloc, target.clone(), "div"),
-                    koopa::ir::BinaryOp::Mod => process_inst(bin, dfg, reg_alloc, target.clone(), "rem"),
+                    koopa::ir::BinaryOp::Add => {
+                        process_inst(bin, dfg, reg_alloc, target.clone(), "add")
+                    }
+                    koopa::ir::BinaryOp::Sub => {
+                        process_inst(bin, dfg, reg_alloc, target.clone(), "sub")
+                    }
+                    koopa::ir::BinaryOp::Mul => {
+                        process_inst(bin, dfg, reg_alloc, target.clone(), "mul")
+                    }
+                    koopa::ir::BinaryOp::Div => {
+                        process_inst(bin, dfg, reg_alloc, target.clone(), "div")
+                    }
+                    koopa::ir::BinaryOp::Mod => {
+                        process_inst(bin, dfg, reg_alloc, target.clone(), "rem")
+                    }
                     koopa::ir::BinaryOp::Eq => process_eq_inst(bin, dfg, reg_alloc, target.clone()),
-                    koopa::ir::BinaryOp::NotEq => process_neq_inst(bin, dfg, reg_alloc, target.clone()),
-                    koopa::ir::BinaryOp::Lt => process_inst(bin, dfg, reg_alloc, target.clone(), "slt"),
-                    koopa::ir::BinaryOp::Gt => process_inst(bin, dfg, reg_alloc, target.clone(), "sgt"),
+                    koopa::ir::BinaryOp::NotEq => {
+                        process_neq_inst(bin, dfg, reg_alloc, target.clone())
+                    }
+                    koopa::ir::BinaryOp::Lt => {
+                        process_inst(bin, dfg, reg_alloc, target.clone(), "slt")
+                    }
+                    koopa::ir::BinaryOp::Gt => {
+                        process_inst(bin, dfg, reg_alloc, target.clone(), "sgt")
+                    }
                     koopa::ir::BinaryOp::Le => process_le_inst(bin, dfg, reg_alloc, target.clone()),
                     koopa::ir::BinaryOp::Ge => process_ge_inst(bin, dfg, reg_alloc, target.clone()),
-                    koopa::ir::BinaryOp::And => process_and_inst(bin, dfg, reg_alloc, target.clone()),
+                    koopa::ir::BinaryOp::And => {
+                        process_and_inst(bin, dfg, reg_alloc, target.clone())
+                    }
                     koopa::ir::BinaryOp::Or => process_or_inst(bin, dfg, reg_alloc, target.clone()),
                     _ => {
                         println!(

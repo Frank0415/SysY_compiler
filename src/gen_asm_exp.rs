@@ -61,7 +61,10 @@ fn load_stack_to_scratch(offset: usize, scratch: &str) -> String {
     if fits_i12(offset as isize) {
         format!("\tlw {}, {}(sp)\n", scratch, offset)
     } else {
-        format!("\tli {}, {}\n\tadd {}, sp, {}\n\tlw {}, 0({})\n", scratch, offset, scratch, scratch, scratch, scratch)
+        format!(
+            "\tli {}, {}\n\tadd {}, sp, {}\n\tlw {}, 0({})\n",
+            scratch, offset, scratch, scratch, scratch, scratch
+        )
     }
 }
 
