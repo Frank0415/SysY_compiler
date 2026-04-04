@@ -1,7 +1,7 @@
 use crate::reg_alloc::{LinearScanAlloc, VariableLocation};
 use koopa::ir::dfg::DataFlowGraph;
-use koopa::ir::values::{Binary, Branch, Call, Jump, Load, Store};
-use koopa::ir::{Function, Value, ValueKind};
+use koopa::ir::values::{Binary, Branch, Call, GetElemPtr, GetPtr, Jump, Load, Store};
+use koopa::ir::{Function, TypeKind, Value, ValueKind};
 use std::collections::HashMap;
 
 struct LoadedBinaryOperands {
@@ -17,8 +17,52 @@ fn release_scratch_regs(reg_alloc: &LinearScanAlloc, regs: Vec<String>) {
     }
 }
 
+fn fits_i12(x: isize) -> bool {
+    (-2048..=2047).contains(&x)
+}
+
+fn emit_load_from_sp(dst: &str, offset: usize, reg_alloc: &LinearScanAlloc) -> String {
+    if fits_i12(offset as isize) {
+        format!("\tlw {}, {}(sp)\n", dst, offset)
+    } else {
+        let addr = reg_alloc.acquire_scratch();
+        let s = format!(
+            "\tli {}, {}\n\tadd {}, sp, {}\n\tlw {}, 0({})\n",
+            addr, offset, addr, addr, dst, addr
+        );
+        reg_alloc.release_scratch(addr);
+        s
+    }
+}
+
+fn emit_store_to_sp(src: &str, offset: usize, reg_alloc: &LinearScanAlloc) -> String {
+    if fits_i12(offset as isize) {
+        format!("\tsw {}, {}(sp)\n", src, offset)
+    } else {
+        let addr = reg_alloc.acquire_scratch();
+        let s = format!(
+            "\tli {}, {}\n\tadd {}, sp, {}\n\tsw {}, 0({})\n",
+            addr, offset, addr, addr, src, addr
+        );
+        reg_alloc.release_scratch(addr);
+        s
+    }
+}
+
+fn emit_addr_from_sp(dst: &str, offset: usize) -> String {
+    if fits_i12(offset as isize) {
+        format!("\taddi {}, sp, {}\n", dst, offset)
+    } else {
+        format!("\tli {}, {}\n\tadd {}, sp, {}\n", dst, offset, dst, dst)
+    }
+}
+
 fn load_stack_to_scratch(offset: usize, scratch: &str) -> String {
-    format!("\tlw {}, {}(sp)\n", scratch, offset)
+    if fits_i12(offset as isize) {
+        format!("\tlw {}, {}(sp)\n", scratch, offset)
+    } else {
+        format!("\tli {}, {}\n\tadd {}, sp, {}\n\tlw {}, 0({})\n", scratch, offset, scratch, scratch, scratch, scratch)
+    }
 }
 
 fn load_variable_stack_to_scratch(
@@ -227,7 +271,7 @@ pub fn process_call_inst(
                         ret += &format!("\tmv {}, {}\n", a_reg, reg);
                     }
                     VariableLocation::Stack(offset) => {
-                        ret += &format!("\tlw {}, {}(sp)\n", a_reg, offset);
+                        ret += &emit_load_from_sp(&a_reg, offset, reg_alloc);
                     }
                     VariableLocation::None => panic!("Call arg has no location: {:?}", arg),
                 }
@@ -237,17 +281,17 @@ pub fn process_call_inst(
             if let ValueKind::Integer(int) = dfg.value(*arg).kind() {
                 let scratch = reg_alloc.acquire_scratch();
                 ret += &format!("\tli {}, {}\n", scratch, int.value());
-                ret += &format!("\tsw {}, {}(sp)\n", scratch, stack_off);
+                ret += &emit_store_to_sp(&scratch, stack_off, reg_alloc);
                 reg_alloc.release_scratch(scratch);
             } else {
                 match reg_alloc.get_variable(arg) {
                     VariableLocation::Register(reg) => {
-                        ret += &format!("\tsw {}, {}(sp)\n", reg, stack_off);
+                        ret += &emit_store_to_sp(&reg, stack_off, reg_alloc);
                     }
                     VariableLocation::Stack(offset) => {
                         let scratch = reg_alloc.acquire_scratch();
-                        ret += &format!("\tlw {}, {}(sp)\n", scratch, offset);
-                        ret += &format!("\tsw {}, {}(sp)\n", scratch, stack_off);
+                        ret += &emit_load_from_sp(&scratch, offset, reg_alloc);
+                        ret += &emit_store_to_sp(&scratch, stack_off, reg_alloc);
                         reg_alloc.release_scratch(scratch);
                     }
                     VariableLocation::None => panic!("Call arg has no location: {:?}", arg),
@@ -266,7 +310,7 @@ pub fn process_call_inst(
             ret += &format!("\tmv {}, a0\n", reg);
         }
         VariableLocation::Stack(offset) => {
-            ret += &format!("\tsw a0, {}(sp)\n", offset);
+            ret += &emit_store_to_sp("a0", offset, reg_alloc);
         }
         VariableLocation::None => {}
     }
@@ -313,6 +357,119 @@ pub fn process_alloc_inst() -> String {
     String::new()
 }
 
+fn load_pointer_base(
+    src: Value,
+    base_reg: &str,
+    dfg: &DataFlowGraph,
+    reg_alloc: &LinearScanAlloc,
+    global_names: &HashMap<Value, String>,
+) -> String {
+    match reg_alloc.get_variable(&src) {
+        VariableLocation::Register(reg) => format!("\tmv {}, {}\n", base_reg, reg),
+        VariableLocation::Stack(offset) => {
+            if matches!(dfg.value(src).kind(), ValueKind::Alloc(_)) {
+                emit_addr_from_sp(base_reg, offset)
+            } else {
+                emit_load_from_sp(base_reg, offset, reg_alloc)
+            }
+        }
+        VariableLocation::None => {
+            let global_name = global_names
+                .get(&src)
+                .unwrap_or_else(|| panic!("Unsupported pointer source"));
+            format!("\tla {}, {}\n", base_reg, global_name)
+        }
+    }
+}
+
+fn lower_ptr_calc(
+    src: Value,
+    index: Value,
+    inst: &koopa::ir::Value,
+    elem_size: usize,
+    dfg: &DataFlowGraph,
+    reg_alloc: &LinearScanAlloc,
+    global_names: &HashMap<Value, String>,
+) -> String {
+    let mut ret = String::new();
+
+    let base = reg_alloc.acquire_scratch();
+    let idx = reg_alloc.acquire_scratch();
+    let scale = reg_alloc.acquire_scratch();
+
+    ret += &load_pointer_base(src, &base, dfg, reg_alloc, global_names);
+
+    if let ValueKind::Integer(int) = dfg.value(index).kind() {
+        ret += &format!("\tli {}, {}\n", idx, int.value());
+    } else {
+        match reg_alloc.get_variable(&index) {
+            VariableLocation::Register(reg) => ret += &format!("\tmv {}, {}\n", idx, reg),
+            VariableLocation::Stack(offset) => ret += &emit_load_from_sp(&idx, offset, reg_alloc),
+            VariableLocation::None => panic!("Index has no location"),
+        }
+    }
+
+    ret += &format!("\tli {}, {}\n", scale, elem_size);
+    ret += &format!("\tmul {}, {}, {}\n", idx, idx, scale);
+    ret += &format!("\tadd {}, {}, {}\n", base, base, idx);
+
+    match reg_alloc.get_variable(inst) {
+        VariableLocation::Register(reg) => ret += &format!("\tmv {}, {}\n", reg, base),
+        VariableLocation::Stack(offset) => ret += &emit_store_to_sp(&base, offset, reg_alloc),
+        VariableLocation::None => panic!("Pointer result has no location"),
+    }
+
+    reg_alloc.release_scratch(scale);
+    reg_alloc.release_scratch(idx);
+    reg_alloc.release_scratch(base);
+
+    ret
+}
+
+pub fn process_getelemptr_inst(
+    gep: &GetElemPtr,
+    inst: &koopa::ir::Value,
+    dfg: &DataFlowGraph,
+    reg_alloc: &LinearScanAlloc,
+    global_names: &HashMap<Value, String>,
+) -> String {
+    let elem_size = match dfg.value(*inst).ty().kind() {
+        TypeKind::Pointer(base) => base.size(),
+        _ => panic!("GetElemPtr result must be a pointer"),
+    };
+    lower_ptr_calc(
+        gep.src(),
+        gep.index(),
+        inst,
+        elem_size,
+        dfg,
+        reg_alloc,
+        global_names,
+    )
+}
+
+pub fn process_getptr_inst(
+    gp: &GetPtr,
+    inst: &koopa::ir::Value,
+    dfg: &DataFlowGraph,
+    reg_alloc: &LinearScanAlloc,
+    global_names: &HashMap<Value, String>,
+) -> String {
+    let elem_size = match dfg.value(*inst).ty().kind() {
+        TypeKind::Pointer(base) => base.size(),
+        _ => panic!("GetPtr result must be a pointer"),
+    };
+    lower_ptr_calc(
+        gp.src(),
+        gp.index(),
+        inst,
+        elem_size,
+        dfg,
+        reg_alloc,
+        global_names,
+    )
+}
+
 pub fn process_load_inst(
     load: &Load,
     inst: &koopa::ir::Value,
@@ -322,45 +479,31 @@ pub fn process_load_inst(
 ) -> String {
     let mut ret = String::new();
     let src = load.src();
-    match reg_alloc.get_variable(&src) {
-        VariableLocation::Stack(src_offset) => match reg_alloc.get_variable(inst) {
-            VariableLocation::Register(reg) => {
-                ret += &format!("\tlw {}, {}(sp)\n", reg, src_offset);
-            }
-            VariableLocation::Stack(stack) => {
-                let scratch = reg_alloc.acquire_scratch();
-                ret += &load_stack_to_scratch(src_offset, &scratch);
-                ret += &format!("\tsw {}, {}(sp)\n", scratch, stack);
-                reg_alloc.release_scratch(scratch);
-            }
-            VariableLocation::None => {
-                panic!("Load destination has neither register nor stack slot")
-            }
-        },
-        VariableLocation::None => {
-            let global_name = global_names
-                .get(&src)
-                .unwrap_or_else(|| panic!("Unsupported load source"))
-                .clone();
 
-            let scratch = reg_alloc.acquire_scratch();
-            ret += &format!("\tla {}, {}\n", scratch, global_name);
-            match reg_alloc.get_variable(inst) {
-                VariableLocation::Register(reg) => {
-                    ret += &format!("\tlw {}, 0({})\n", reg, scratch);
-                }
-                VariableLocation::Stack(stack) => {
-                    ret += &format!("\tlw {}, 0({})\n", scratch, scratch);
-                    ret += &format!("\tsw {}, {}(sp)\n", scratch, stack);
-                }
-                VariableLocation::None => {
-                    panic!("Load destination has neither register nor stack slot")
-                }
-            }
-            reg_alloc.release_scratch(scratch);
+    let val_tmp = reg_alloc.acquire_scratch();
+    match dfg.value(src).kind() {
+        ValueKind::Alloc(_) => {
+            let src_offset = match reg_alloc.get_variable(&src) {
+                VariableLocation::Stack(offset) => offset,
+                _ => panic!("Alloc source should be stack allocated"),
+            };
+            ret += &emit_load_from_sp(&val_tmp, src_offset, reg_alloc);
         }
-        VariableLocation::Register(_) => panic!("Load source should not be a register"),
+        _ => {
+            let addr = reg_alloc.acquire_scratch();
+            ret += &load_pointer_base(src, &addr, dfg, reg_alloc, global_names);
+            ret += &format!("\tlw {}, 0({})\n", val_tmp, addr);
+            reg_alloc.release_scratch(addr);
+        }
     }
+
+    match reg_alloc.get_variable(inst) {
+        VariableLocation::Register(reg) => ret += &format!("\tmv {}, {}\n", reg, val_tmp),
+        VariableLocation::Stack(stack) => ret += &emit_store_to_sp(&val_tmp, stack, reg_alloc),
+        VariableLocation::None => panic!("Load destination has neither register nor stack slot"),
+    }
+    reg_alloc.release_scratch(val_tmp);
+
     ret
 }
 
@@ -373,102 +516,55 @@ pub fn process_store_inst(
     let mut ret = String::new();
     let val = store.value();
     let dest = store.dest();
-    match reg_alloc.get_variable(&dest) {
-        VariableLocation::Stack(dest_offset) => {
-            if let koopa::ir::ValueKind::Integer(int) = dfg.value(val).kind() {
-                let v = int.value();
-                if v == 0 {
-                    ret += &format!("\tsw x0, {}(sp)\n", dest_offset);
-                } else {
-                    let scratch = reg_alloc.acquire_scratch();
-                    ret += &format!("\tli {}, {}\n", scratch, v);
-                    ret += &format!("\tsw {}, {}(sp)\n", scratch, dest_offset);
-                    reg_alloc.release_scratch(scratch);
-                }
-            } else {
-                match dfg.value(val).kind() {
-                    ValueKind::FuncArgRef(arg_ref) => {
-                        let idx = arg_ref.index();
-                        if idx < 8 {
-                            ret += &format!("\tsw a{}, {}(sp)\n", idx, dest_offset);
-                        } else {
-                            let caller_arg_offset = reg_alloc.get_stack_count() + (idx - 8) * 4;
-                            let scratch = reg_alloc.acquire_scratch();
-                            ret += &format!("\tlw {}, {}(sp)\n", scratch, caller_arg_offset);
-                            ret += &format!("\tsw {}, {}(sp)\n", scratch, dest_offset);
-                            reg_alloc.release_scratch(scratch);
-                        }
-                    }
-                    _ => match reg_alloc.get_variable(&val) {
-                        VariableLocation::Register(reg) => {
-                            ret += &format!("\tsw {}, {}(sp)\n", reg, dest_offset);
-                        }
-                        VariableLocation::Stack(_) => {
-                            let scratch = reg_alloc.acquire_scratch();
-                            ret += &load_variable_stack_to_scratch(&val, reg_alloc, &scratch);
-                            ret += &format!("\tsw {}, {}(sp)\n", scratch, dest_offset);
-                            reg_alloc.release_scratch(scratch);
-                        }
-                        VariableLocation::None => {
-                            panic!("Store value has neither register nor stack slot")
-                        }
-                    },
-                }
-            }
-        }
-        VariableLocation::None => {
-            let global_name = global_names
-                .get(&dest)
-                .unwrap_or_else(|| panic!("Unsupported store destination"))
-                .clone();
+    let val_reg = reg_alloc.acquire_scratch();
 
-            let addr = reg_alloc.acquire_scratch();
-            ret += &format!("\tla {}, {}\n", addr, global_name);
-            if let ValueKind::Integer(int) = dfg.value(val).kind() {
-                let v = int.value();
-                if v == 0 {
-                    ret += &format!("\tsw x0, 0({})\n", addr);
+    if let koopa::ir::ValueKind::Integer(int) = dfg.value(val).kind() {
+        let v = int.value();
+        if v == 0 {
+            ret += &format!("\tmv {}, x0\n", val_reg);
+        } else {
+            ret += &format!("\tli {}, {}\n", val_reg, v);
+        }
+    } else {
+        match dfg.value(val).kind() {
+            ValueKind::FuncArgRef(arg_ref) => {
+                let idx = arg_ref.index();
+                if idx < 8 {
+                    ret += &format!("\tmv {}, a{}\n", val_reg, idx);
                 } else {
-                    let scratch = reg_alloc.acquire_scratch();
-                    ret += &format!("\tli {}, {}\n", scratch, v);
-                    ret += &format!("\tsw {}, 0({})\n", scratch, addr);
-                    reg_alloc.release_scratch(scratch);
-                }
-            } else {
-                match dfg.value(val).kind() {
-                    ValueKind::FuncArgRef(arg_ref) => {
-                        let idx = arg_ref.index();
-                        if idx < 8 {
-                            ret += &format!("\tsw a{}, 0({})\n", idx, addr);
-                        } else {
-                            let caller_arg_offset = reg_alloc.get_stack_count() + (idx - 8) * 4;
-                            let scratch = reg_alloc.acquire_scratch();
-                            ret += &format!("\tlw {}, {}(sp)\n", scratch, caller_arg_offset);
-                            ret += &format!("\tsw {}, 0({})\n", scratch, addr);
-                            reg_alloc.release_scratch(scratch);
-                        }
-                    }
-                    _ => match reg_alloc.get_variable(&val) {
-                        VariableLocation::Register(reg) => {
-                            ret += &format!("\tsw {}, 0({})\n", reg, addr);
-                        }
-                        VariableLocation::Stack(offset) => {
-                            let scratch = reg_alloc.acquire_scratch();
-                            ret += &format!("\tlw {}, {}(sp)\n", scratch, offset);
-                            ret += &format!("\tsw {}, 0({})\n", scratch, addr);
-                            reg_alloc.release_scratch(scratch);
-                        }
-                        VariableLocation::None => {
-                            panic!("Store value has neither register nor stack slot")
-                        }
-                    },
+                    let caller_arg_offset = reg_alloc.get_stack_count() + (idx - 8) * 4;
+                    ret += &emit_load_from_sp(&val_reg, caller_arg_offset, reg_alloc);
                 }
             }
-            reg_alloc.release_scratch(addr);
+            _ => match reg_alloc.get_variable(&val) {
+                VariableLocation::Register(reg) => {
+                    ret += &format!("\tmv {}, {}\n", val_reg, reg);
+                }
+                VariableLocation::Stack(offset) => {
+                    ret += &emit_load_from_sp(&val_reg, offset, reg_alloc);
+                }
+                VariableLocation::None => panic!("Store value has neither register nor stack slot"),
+            },
         }
-        VariableLocation::Register(_) => panic!("Store destination should not be a register"),
     }
 
+    match dfg.value(dest).kind() {
+        ValueKind::Alloc(_) => {
+            let dest_offset = match reg_alloc.get_variable(&dest) {
+                VariableLocation::Stack(offset) => offset,
+                _ => panic!("Alloc destination should be stack allocated"),
+            };
+            ret += &emit_store_to_sp(&val_reg, dest_offset, reg_alloc);
+        }
+        _ => {
+            let addr = reg_alloc.acquire_scratch();
+            ret += &load_pointer_base(dest, &addr, dfg, reg_alloc, global_names);
+            ret += &format!("\tsw {}, 0({})\n", val_reg, addr);
+            reg_alloc.release_scratch(addr);
+        }
+    }
+
+    reg_alloc.release_scratch(val_reg);
     ret
 }
 

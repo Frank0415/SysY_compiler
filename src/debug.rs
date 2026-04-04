@@ -127,9 +127,14 @@ impl Debug for ConstDecl {
 
 impl Debug for ConstDef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.array_len {
-            Some(len) => write!(f, "{}[{:?}] = {:?}", self.ident, len, self.init_val),
-            None => write!(f, "{} = {:?}", self.ident, self.init_val),
+        if self.array_lens.is_empty() {
+            write!(f, "{} = {:?}", self.ident, self.init_val)
+        } else {
+            write!(f, "{}", self.ident)?;
+            for len in &self.array_lens {
+                write!(f, "[{:?}]", len)?;
+            }
+            write!(f, " = {:?}", self.init_val)
         }
     }
 }
@@ -157,10 +162,10 @@ impl Debug for VarDecl {
 
 impl Debug for VarDef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match &self.array_len {
-            Some(len) => format!("{}[{:?}]", self.ident, len),
-            None => self.ident.clone(),
-        };
+        let mut name = self.ident.clone();
+        for len in &self.array_lens {
+            name.push_str(&format!("[{:?}]", len));
+        }
         match &self.init_val {
             None => write!(f, "{}, no evaluation!", name),
             Some(init_val) => write!(f, "{} = {:?}", name, init_val),
@@ -179,9 +184,14 @@ impl Debug for InitVal {
 
 impl Debug for LVal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.index {
-            Some(exp) => write!(f, "{}[{:?}]", self.ident, exp),
-            None => write!(f, "{}", self.ident),
+        if self.indices.is_empty() {
+            write!(f, "{}", self.ident)
+        } else {
+            write!(f, "{}", self.ident)?;
+            for exp in &self.indices {
+                write!(f, "[{:?}]", exp)?;
+            }
+            Ok(())
         }
     }
 }

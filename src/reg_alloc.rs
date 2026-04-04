@@ -1,4 +1,4 @@
-use koopa::ir::{FunctionData, Value, ValueKind};
+use koopa::ir::{FunctionData, TypeKind, Value, ValueKind};
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
@@ -138,10 +138,19 @@ impl LinearScanAlloc {
                 start: *v,
                 end: *end.get(k).unwrap_or(v), // 如果没有使用点，end 就是 start
             };
-            println!("Live interval for value {:?}: {:?}", k, live_interval);
             liveint.push(live_interval); // 记得把构建好的 interval 存入 Vec
         }
         (liveint, stack_start) // 返回填充好的 Vec
+    }
+
+    fn stack_slot_size(func: &FunctionData, value: Value) -> usize {
+        match func.dfg().value(value).kind() {
+            ValueKind::Alloc(_) => match func.dfg().value(value).ty().kind() {
+                TypeKind::Pointer(base) => base.size(),
+                _ => 4,
+            },
+            _ => 4,
+        }
     }
 
     pub fn allocate(&mut self, func: &FunctionData) {
@@ -151,18 +160,10 @@ impl LinearScanAlloc {
         let mut spilled_values: Vec<Value> = Vec::new();
 
         for current in intervals {
-            println!(
-                "Allocating for value {:?} (start: {}, end: {})",
-                current.value, current.start, current.end
-            );
             // 1. 释放已死亡的区间
             while let Some(top) = active.peek() {
                 if top.end < current.start {
                     let dead: ActiveInterval = active.pop().unwrap();
-                    println!(
-                        "  Freeing register {} from expired value {:?}",
-                        dead.reg, dead.value
-                    );
                     self.free_regs.push(dead.reg);
                 } else {
                     break;
@@ -172,7 +173,6 @@ impl LinearScanAlloc {
             // 2. 尝试分配
             if let Some(reg) = self.free_regs.pop() {
                 // 有空闲寄存器
-                println!("  Assigned register {} to value {:?}", reg, current.value);
                 self.allocation.insert(current.value, reg.clone());
                 active.push(ActiveInterval {
                     end: current.end,
@@ -181,11 +181,6 @@ impl LinearScanAlloc {
                 });
             } else {
                 spilled_values.push(current.value);
-                println!(
-                    "No free registers found, stack size {} assigned to value {:?}, ",
-                    spilled_values.len() * 4,
-                    current.value
-                );
             }
 
             // {
@@ -224,11 +219,6 @@ impl LinearScanAlloc {
         // 3.分配stack
         for (stack, _place) in stack_maps.iter() {
             spilled_values.push(*stack);
-            println!(
-                "Assigned stack size {} assigned to value {:?}",
-                spilled_values.len() * 4,
-                stack
-            );
         }
 
         let mut max_call_args = 0usize;
@@ -243,7 +233,10 @@ impl LinearScanAlloc {
 
         self.outgoing_arg_area = max_call_args.saturating_sub(8) * 4;
         let rr = if self.has_call { 4 } else { 0 };
-        let local_bytes = spilled_values.len() * 4;
+        let local_bytes: usize = spilled_values
+            .iter()
+            .map(|v| Self::stack_slot_size(func, *v))
+            .sum();
 
         let raw_stack_size = self.outgoing_arg_area + local_bytes + rr;
         self.stack_count = if raw_stack_size == 0 {
@@ -257,9 +250,10 @@ impl LinearScanAlloc {
             None
         };
 
-        for (idx, stack) in spilled_values.iter().enumerate() {
-            self.stack_slots
-                .insert(*stack, self.outgoing_arg_area + idx * 4);
+        let mut local_offset = self.outgoing_arg_area;
+        for stack in spilled_values.iter() {
+            self.stack_slots.insert(*stack, local_offset);
+            local_offset += Self::stack_slot_size(func, *stack);
         }
     }
 
@@ -304,6 +298,8 @@ impl LinearScanAlloc {
                 ret.reg = vec![*inst];
                 ret.stack = vec![load.src()];
             }
+            GetElemPtr(gep) => ret.reg = vec![gep.src(), gep.index()],
+            GetPtr(gp) => ret.reg = vec![gp.src(), gp.index()],
             // Store(store) => vec![store.dest(), store.value()],
             _ => {}
         }

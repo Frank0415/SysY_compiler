@@ -98,7 +98,7 @@ pub enum Exp {
 #[derive(PartialEq)]
 pub struct LVal {
     pub ident: String,
-    pub index: Option<Box<Exp>>,
+    pub indices: Vec<Exp>,
 }
 
 #[derive(PartialEq)]
@@ -151,14 +151,14 @@ pub struct ConstDecl {
 #[derive(PartialEq)]
 pub struct ConstDef {
     pub ident: String,
-    pub array_len: Option<ConstExp>,
+    pub array_lens: Vec<ConstExp>,
     pub init_val: ConstInitVal,
 }
 
 #[derive(PartialEq)]
 pub enum ConstInitVal {
     Exp(ConstExp),
-    List(Vec<ConstExp>),
+    List(Vec<ConstInitVal>),
 }
 
 #[derive(PartialEq)]
@@ -174,7 +174,7 @@ pub struct VarDecl {
 #[derive(PartialEq)]
 pub struct VarDef {
     pub ident: String,
-    pub array_len: Option<ConstExp>,
+    pub array_lens: Vec<ConstExp>,
     pub init_val: Option<InitVal>,
 }
 // #[derive(PartialEq)]
@@ -185,7 +185,7 @@ pub struct VarDef {
 #[derive(PartialEq)]
 pub enum InitVal {
     Exp(Exp),
-    List(Vec<Exp>),
+    List(Vec<InitVal>),
 }
 
 pub trait EvalExp {
@@ -212,7 +212,7 @@ impl EvalExp for Exp {
             }
             Exp::Var(name) => var_map.get_const(name).expect("Undefined constant"),
             Exp::LVal(lv) => {
-                if lv.index.is_some() {
+                if !lv.indices.is_empty() {
                     panic!("Indexed lvalue should not be evaluated at compile time")
                 }
                 var_map.get_const(&lv.ident).expect("Undefined constant")

@@ -31,11 +31,12 @@ impl ProcessIr for Exp {
             }
             Exp::Var(variable) => process_to_ir_variable(func_data, bb, variable, var_map),
             Exp::LVal(lval) => {
-                if let Some(index_exp) = &lval.index {
+                if !lval.indices.is_empty() {
+                    assert!(lval.indices.len() == 1, "multi-dimensional arrays are not implemented in IR yet");
                     let src = var_map
                         .get(&lval.ident)
                         .unwrap_or_else(|| panic!("Undefined variable: {}", lval.ident));
-                    let index_val = index_exp.process_to_ir(func_data, bb, var_map, func_map);
+                    let index_val = lval.indices[0].process_to_ir(func_data, bb, var_map, func_map);
                     let elem_ptr = func_data.dfg_mut().new_value().get_elem_ptr(src, index_val);
                     func_data
                         .layout_mut()

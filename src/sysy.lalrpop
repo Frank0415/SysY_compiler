@@ -95,11 +95,11 @@ ConstDecl: ConstDecl = {
 
 // 单个常量定义：标识符 = 初始化值
 ConstDef: ConstDef =
-    <ident: Ident> <array_len: ("[" <ConstExp> "]")?> "=" <init_val: ConstInitVal>
-    => ConstDef { ident, array_len, init_val };
+    <ident: Ident> <array_lens: ("[" <ConstExp> "]")*> "=" <init_val: ConstInitVal>
+    => ConstDef { ident, array_lens, init_val };
 
-ConstInitValList: Vec<ConstExp> = {
-    <head: ConstExp> <tail: ("," <ConstExp>)*> => {
+ConstInitValList: Vec<ConstInitVal> = {
+    <head: ConstInitVal> <tail: ("," <ConstInitVal>)*> => {
         let mut vals = vec![head];
         vals.extend(tail);
         vals
@@ -124,14 +124,14 @@ VarDecl: VarDecl = {
 }
 
 VarDef: VarDef = {
-    <ident: Ident> <array_len: ("[" <ConstExp> "]")?> "=" <init_val: InitVal>
-        => VarDef { ident, array_len, init_val: Some(init_val) },
-    <ident: Ident> <array_len: ("[" <ConstExp> "]")?>
-        => VarDef { ident, array_len, init_val: None },
+    <ident: Ident> <array_lens: ("[" <ConstExp> "]")*> "=" <init_val: InitVal>
+        => VarDef { ident, array_lens, init_val: Some(init_val) },
+    <ident: Ident> <array_lens: ("[" <ConstExp> "]")*>
+        => VarDef { ident, array_lens, init_val: None },
 };
 
-InitValList: Vec<Exp> = {
-    <head: Exp> <tail: ("," <Exp>)*> => {
+InitValList: Vec<InitVal> = {
+    <head: InitVal> <tail: ("," <InitVal>)*> => {
         let mut vals = vec![head];
         vals.extend(tail);
         vals
@@ -284,7 +284,7 @@ PrimaryExp: Exp = {
     "(" <exp: Exp> ")" => exp,           // 括号改变优先级
     <num: Number> => num,
     <lv: LVal> => {
-        if lv.index.is_none() {
+        if lv.indices.is_empty() {
             Exp::Var(lv.ident)
         } else {
             Exp::LVal(lv)
@@ -292,9 +292,9 @@ PrimaryExp: Exp = {
     },
 };
 
-LVal: LVal = <ident: Ident> <index: ("[" <Exp> "]")?> => LVal {
+LVal: LVal = <ident: Ident> <indices: ("[" <Exp> "]")*> => LVal {
     ident,
-    index: index.map(Box::new),
+    indices,
 };
 
 // 一元运算符

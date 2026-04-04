@@ -7,9 +7,11 @@ use std::fs::{read_to_string, write};
 use std::io::Result;
 use std::process::exit;
 use koopa::back::KoopaGenerator;
-use koopa::ir::Program;
+use koopa::ir::{Program, Type};
 
 fn main() -> Result<()> {
+    Type::set_ptr_size(4);
+
     // 解析命令行参数
     let mut args = args();
     args.next();

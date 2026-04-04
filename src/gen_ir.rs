@@ -66,7 +66,7 @@ fn process_global_decl(var_map: &mut Variables, program: &mut Program, decl: Dec
                     "duplicate global symbol: {}",
                     def.ident
                 );
-                if def.array_len.is_some() {
+                if !def.array_lens.is_empty() {
                     // Lv9 array const handling is outside current IR scope.
                     continue;
                 }
@@ -89,8 +89,9 @@ fn process_global_decl(var_map: &mut Variables, program: &mut Program, decl: Dec
                     def.ident
                 );
 
-                let alloc_init = if let Some(len_exp) = def.array_len {
-                    let len = len_exp.exp.eval_exp(var_map);
+                let alloc_init = if !def.array_lens.is_empty() {
+                    assert!(def.array_lens.len() == 1, "multi-dimensional arrays are not implemented in IR yet");
+                    let len = def.array_lens[0].exp.eval_exp(var_map);
                     assert!(len > 0, "array length must be positive");
                     let arr_ty = Type::get_array(base_ty.clone(), len as usize);
                     match def.init_val {
@@ -98,9 +99,13 @@ fn process_global_decl(var_map: &mut Variables, program: &mut Program, decl: Dec
                             let mut elems = Vec::new();
                             for i in 0..(len as usize) {
                                 if i < items.len() {
-                                    elems.push(
-                                        program.new_value().integer(items[i].eval_exp(var_map)),
-                                    );
+                                    let v = match &items[i] {
+                                        crate::ast::InitVal::Exp(exp) => exp.eval_exp(var_map),
+                                        crate::ast::InitVal::List(_) => {
+                                            panic!("multi-dimensional array initializer is not implemented in IR yet")
+                                        }
+                                    };
+                                    elems.push(program.new_value().integer(v));
                                 } else {
                                     elems.push(program.new_value().integer(0));
                                 }
@@ -289,7 +294,7 @@ fn process_block_item(
                     !var_map.contains_in_current_scope(&id),
                     "Should not declare a constant multiple times in the same scope!"
                 );
-                if def.array_len.is_some() {
+                if !def.array_lens.is_empty() {
                     continue;
                 }
                 let val = match def.init_val {
@@ -311,8 +316,9 @@ fn process_block_item(
                     !var_map.contains_in_current_scope(&id),
                     "Should not declare a variable multiple times in the same scope!"
                 );
-                let alloc_ty = if let Some(len_exp) = &def.array_len {
-                    let len = len_exp.exp.eval_exp(var_map);
+                let alloc_ty = if !def.array_lens.is_empty() {
+                    assert!(def.array_lens.len() == 1, "multi-dimensional arrays are not implemented in IR yet");
+                    let len = def.array_lens[0].exp.eval_exp(var_map);
                     assert!(len > 0, "array length must be positive");
                     Type::get_array(base_ty.clone(), len as usize)
                 } else {
@@ -332,9 +338,10 @@ fn process_block_item(
                     .unwrap();
 
                 if let Some(init_val) = def.init_val {
-                    match (def.array_len, init_val) {
-                        (Some(len_exp), crate::ast::InitVal::List(items)) => {
-                            let len = len_exp.exp.eval_exp(var_map);
+                    match (def.array_lens, init_val) {
+                        (lens, crate::ast::InitVal::List(items)) if !lens.is_empty() => {
+                            assert!(lens.len() == 1, "multi-dimensional arrays are not implemented in IR yet");
+                            let len = lens[0].exp.eval_exp(var_map);
                             for i in 0..(len as usize) {
                                 let idx_val = func_data.dfg_mut().new_value().integer(i as i32);
                                 let elem_ptr = func_data
@@ -349,12 +356,17 @@ fn process_block_item(
                                     .unwrap();
 
                                 let init_elem = if i < items.len() {
-                                    items[i].process_to_ir(
-                                        func_data,
-                                        &mut current_bb,
-                                        var_map,
-                                        func_map,
-                                    )
+                                    match &items[i] {
+                                        crate::ast::InitVal::Exp(exp) => exp.process_to_ir(
+                                            func_data,
+                                            &mut current_bb,
+                                            var_map,
+                                            func_map,
+                                        ),
+                                        crate::ast::InitVal::List(_) => {
+                                            panic!("multi-dimensional array initializer is not implemented in IR yet")
+                                        }
+                                    }
                                 } else {
                                     func_data.dfg_mut().new_value().integer(0)
                                 };
@@ -367,10 +379,10 @@ fn process_block_item(
                                     .unwrap();
                             }
                         }
-                        (Some(_), crate::ast::InitVal::Exp(_)) => {
+                        (lens, crate::ast::InitVal::Exp(_)) if !lens.is_empty() => {
                             panic!("Array variable expected list initializer")
                         }
-                        (None, crate::ast::InitVal::Exp(exp)) => {
+                        (lens, crate::ast::InitVal::Exp(exp)) if lens.is_empty() => {
                             let val =
                                 exp.process_to_ir(func_data, &mut current_bb, var_map, func_map);
                             let store_inst = func_data.dfg_mut().new_value().store(val, alloc_ptr);
@@ -381,9 +393,10 @@ fn process_block_item(
                                 .push_key_back(store_inst)
                                 .unwrap();
                         }
-                        (None, crate::ast::InitVal::List(_)) => {
+                        (lens, crate::ast::InitVal::List(_)) if lens.is_empty() => {
                             panic!("Scalar variable expected scalar initializer")
                         }
+                        _ => unreachable!(),
                     }
                 }
                 var_map.insert(id, SymbolInfo::Var(alloc_ptr));
@@ -406,9 +419,10 @@ fn process_stmt(
             let mut current_bb = bb;
             let val = exp.process_to_ir(func_data, &mut current_bb, var_map, func_map);
             if let Some(dest_base) = var_map.get(&lval.ident) {
-                let dest = if let Some(index_exp) = lval.index {
+                let dest = if !lval.indices.is_empty() {
+                    assert!(lval.indices.len() == 1, "multi-dimensional arrays are not implemented in IR yet");
                     let index_val =
-                        index_exp.process_to_ir(func_data, &mut current_bb, var_map, func_map);
+                        lval.indices[0].process_to_ir(func_data, &mut current_bb, var_map, func_map);
                     let elem_ptr = func_data
                         .dfg_mut()
                         .new_value()

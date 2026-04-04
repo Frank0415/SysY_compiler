@@ -4,8 +4,45 @@ use koopa::ir::ValueKind;
 use koopa::ir::dfg::DataFlowGraph;
 use koopa::ir::entities::ValueData;
 use koopa::ir::{Function, FunctionData, Program, Value};
-use std::fmt::Error;
 use std::collections::HashMap;
+use std::fmt::Error;
+
+fn fits_i12(x: isize) -> bool {
+    (-2048..=2047).contains(&x)
+}
+
+fn emit_adjust_sp(delta: isize) -> String {
+    if delta == 0 {
+        return String::new();
+    }
+    if fits_i12(delta) {
+        format!("\taddi sp, sp, {}\n", delta)
+    } else {
+        format!("\tli t0, {}\n\tadd sp, sp, t0\n", delta)
+    }
+}
+
+fn emit_store_to_sp(src: &str, offset: usize) -> String {
+    if fits_i12(offset as isize) {
+        format!("\tsw {}, {}(sp)\n", src, offset)
+    } else {
+        format!(
+            "\tli t0, {}\n\tadd t0, sp, t0\n\tsw {}, 0(t0)\n",
+            offset, src
+        )
+    }
+}
+
+fn emit_load_from_sp(dst: &str, offset: usize) -> String {
+    if fits_i12(offset as isize) {
+        format!("\tlw {}, {}(sp)\n", dst, offset)
+    } else {
+        format!(
+            "\tli t0, {}\n\tadd t0, sp, t0\n\tlw {}, 0(t0)\n",
+            offset, dst
+        )
+    }
+}
 
 pub trait GenAsm {
     fn gen_asm(&self) -> Result<String, Error>;
@@ -40,19 +77,10 @@ impl GenAsm for Program {
                 ValueKind::GlobalAlloc(ga) => ga.init(),
                 _ => continue,
             };
-            let init_data = self.borrow_value(init);
 
             global_str += &format!("\t.globl {}\n", global_name);
             global_str += &format!("{}:\n", global_name);
-            match init_data.kind() {
-                ValueKind::ZeroInit(_) => {
-                    global_str += "\t.zero 4\n";
-                }
-                ValueKind::Integer(int) => {
-                    global_str += &format!("\t.word {}\n", int.value());
-                }
-                _ => unimplemented!("Unsupported global initializer kind"),
-            }
+            emit_global_initializer(self, init, &mut global_str);
         }
 
         if !global_str.is_empty() {
@@ -84,6 +112,24 @@ impl GenAsm for Program {
     }
 }
 
+fn emit_global_initializer(program: &Program, value: Value, out: &mut String) {
+    let data = program.borrow_value(value);
+    match data.kind() {
+        ValueKind::ZeroInit(_) => {
+            out.push_str(&format!("\t.zero {}\n", data.ty().size()));
+        }
+        ValueKind::Integer(int) => {
+            out.push_str(&format!("\t.word {}\n", int.value()));
+        }
+        ValueKind::Aggregate(agg) => {
+            for elem in agg.elems() {
+                emit_global_initializer(program, *elem, out);
+            }
+        }
+        _ => unimplemented!("Unsupported global initializer kind"),
+    }
+}
+
 fn gen_func_asm(
     func_data: &FunctionData,
     func_names: &HashMap<Function, String>,
@@ -97,10 +143,10 @@ fn gen_func_asm(
     reg_alloc.allocate(func_data);
     let stack_size = reg_alloc.get_stack_count();
     if stack_size > 0 {
-        str += &format!("\taddi sp, sp, -{}\n", stack_size);
+        str += &emit_adjust_sp(-(stack_size as isize));
     }
     if let Some(ra_offset) = reg_alloc.get_ra_offset() {
-        str += &format!("\tsw ra, {}(sp)\n", ra_offset);
+        str += &emit_store_to_sp("ra", ra_offset);
     }
     for (&bb, node) in func_data.layout().bbs() {
         // Add the label for the basic block (skip %entry which is handled by function name)
@@ -127,7 +173,6 @@ impl LocalGenAsm for ValueData {
         func_names: &HashMap<Function, String>,
         global_names: &HashMap<Value, String>,
     ) -> String {
-        println!("Translating instruction: {:?}", self.kind());
         self.used_by();
         match self.kind() {
             ValueKind::Return(ret) => {
@@ -141,7 +186,7 @@ impl LocalGenAsm for ValueData {
                                 res += &format!("\tmv a0, {}\n", reg);
                             }
                             VariableLocation::Stack(stack_offset) => {
-                                res += &format!("\tlw a0, {}(sp)\n", stack_offset);
+                                res += &emit_load_from_sp("a0", stack_offset);
                             }
                             VariableLocation::None => {
                                 unreachable!("Return value not found in register or stack");
@@ -151,10 +196,10 @@ impl LocalGenAsm for ValueData {
                 }
                 let stack_size = reg_alloc.get_stack_count();
                 if let Some(ra_offset) = reg_alloc.get_ra_offset() {
-                    res += &format!("\tlw ra, {}(sp)\n", ra_offset);
+                    res += &emit_load_from_sp("ra", ra_offset);
                 }
                 if stack_size > 0 {
-                    res += &format!("\taddi sp, sp, {}\n", stack_size);
+                    res += &emit_adjust_sp(stack_size as isize);
                 }
                 res += "\tret\n";
                 res
@@ -191,7 +236,7 @@ impl LocalGenAsm for ValueData {
                     }
                 };
                 if let VariableLocation::Stack(offset) = target_loc {
-                    asm += &format!("\tsw {}, {}(sp)\n", target, offset);
+                    asm += &emit_store_to_sp(&target, offset);
                     reg_alloc.release_scratch(target);
                 }
                 asm
@@ -199,6 +244,12 @@ impl LocalGenAsm for ValueData {
             ValueKind::Alloc(_alloc) => process_alloc_inst(),
             ValueKind::Load(load) => process_load_inst(load, value, dfg, reg_alloc, global_names),
             ValueKind::Store(store) => process_store_inst(store, dfg, reg_alloc, global_names),
+            ValueKind::GetElemPtr(getelemptr) => {
+                process_getelemptr_inst(getelemptr, value, dfg, reg_alloc, global_names)
+            }
+            ValueKind::GetPtr(getptr) => {
+                process_getptr_inst(getptr, value, dfg, reg_alloc, global_names)
+            }
             ValueKind::Call(call) => process_call_inst(call, value, dfg, reg_alloc, func_names),
             ValueKind::Branch(branch) => process_branch_inst(branch, dfg, reg_alloc),
             ValueKind::Jump(jmp) => process_jump_inst(jmp, dfg, reg_alloc),
