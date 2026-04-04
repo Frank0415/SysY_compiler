@@ -120,7 +120,9 @@ impl LinearScanAlloc {
                 for register in op_res.reg {
                     // println!("Operand: {:?}", register);
                     // 只有当操作数不是立即数（Integer）时，才需要分配寄存器/记录活跃区间
-                    if !matches!(dfg.value(register).kind(), ValueKind::Integer(_)) {
+                    if dfg.values().contains_key(&register)
+                        && !matches!(dfg.value(register).kind(), ValueKind::Integer(_))
+                    {
                         end.insert(register, program_point);
                     }
                 }

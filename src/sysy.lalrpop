@@ -59,7 +59,12 @@ FuncFParams: Vec<FuncFParam> = {
     }
 };
 
-FuncFParam: FuncFParam = <bt: RawType> <id: Ident> => FuncFParam { bt, id };
+FuncFParam: FuncFParam = {
+    <bt: RawType> <id: Ident> "[" "]" <array_lens: ("[" <ConstExp> "]")*>
+        => FuncFParam { bt, id, is_array: true, array_lens },
+    <bt: RawType> <id: Ident>
+        => FuncFParam { bt, id, is_array: false, array_lens: vec![] },
+};
 
 // 函数返回类型（目前仅支持 int）
 // RawType: RawType = "int" => RawType::Int;

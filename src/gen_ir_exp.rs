@@ -3,6 +3,99 @@ use crate::gen_ir_variables::Variables;
 use koopa::ir::{builder_traits::*, *};
 use std::collections::HashMap;
 
+fn emit_lval_ptr(
+    func_data: &mut FunctionData,
+    bb: &mut BasicBlock,
+    var_map: &mut Variables,
+    func_map: &HashMap<String, Function>,
+    lval: &crate::ast::LVal,
+) -> Value {
+    let base = var_map
+        .get(&lval.ident)
+        .unwrap_or_else(|| panic!("Undefined variable: {}", lval.ident));
+
+    let mut ptr = base;
+    let mut first_use_getptr = false;
+    if let Some(data) = func_data.dfg().values().get(&base)
+        && let TypeKind::Pointer(inner) = data.ty().kind()
+        && matches!(inner.kind(), TypeKind::Pointer(_))
+    {
+        let loaded = func_data.dfg_mut().new_value().load(base);
+        func_data
+            .layout_mut()
+            .bb_mut(*bb)
+            .insts_mut()
+            .push_key_back(loaded)
+            .unwrap();
+        ptr = loaded;
+        first_use_getptr = true;
+    }
+
+    for (i, idx_exp) in lval.indices.iter().enumerate() {
+        let index_val = idx_exp.process_to_ir(func_data, bb, var_map, func_map);
+        let next = if i == 0 && first_use_getptr {
+            func_data.dfg_mut().new_value().get_ptr(ptr, index_val)
+        } else {
+            func_data.dfg_mut().new_value().get_elem_ptr(ptr, index_val)
+        };
+        func_data
+            .layout_mut()
+            .bb_mut(*bb)
+            .insts_mut()
+            .push_key_back(next)
+            .unwrap();
+        ptr = next;
+    }
+    ptr
+}
+
+fn maybe_decay_array_arg(
+    func_data: &mut FunctionData,
+    bb: &mut BasicBlock,
+    var_map: &mut Variables,
+    name: &String,
+) -> Option<Value> {
+    let base = var_map.get(name)?;
+    let data = func_data.dfg().values().get(&base)?;
+    let TypeKind::Pointer(inner) = data.ty().kind() else {
+        return None;
+    };
+    match inner.kind() {
+        TypeKind::Array(_, _) => {
+            let zero = func_data.dfg_mut().new_value().integer(0);
+            let p = func_data.dfg_mut().new_value().get_elem_ptr(base, zero);
+            func_data
+                .layout_mut()
+                .bb_mut(*bb)
+                .insts_mut()
+                .push_key_back(p)
+                .unwrap();
+            Some(p)
+        }
+        TypeKind::Pointer(_) => {
+            let p = func_data.dfg_mut().new_value().load(base);
+            func_data
+                .layout_mut()
+                .bb_mut(*bb)
+                .insts_mut()
+                .push_key_back(p)
+                .unwrap();
+            Some(p)
+        }
+        _ => None,
+    }
+}
+
+pub fn process_lval_to_ptr(
+    func_data: &mut FunctionData,
+    bb: &mut BasicBlock,
+    var_map: &mut Variables,
+    func_map: &HashMap<String, Function>,
+    lval: &crate::ast::LVal,
+) -> Value {
+    emit_lval_ptr(func_data, bb, var_map, func_map, lval)
+}
+
 pub trait ProcessIr {
     fn process_to_ir(
         &self,
@@ -32,19 +125,8 @@ impl ProcessIr for Exp {
             Exp::Var(variable) => process_to_ir_variable(func_data, bb, variable, var_map),
             Exp::LVal(lval) => {
                 if !lval.indices.is_empty() {
-                    assert!(lval.indices.len() == 1, "multi-dimensional arrays are not implemented in IR yet");
-                    let src = var_map
-                        .get(&lval.ident)
-                        .unwrap_or_else(|| panic!("Undefined variable: {}", lval.ident));
-                    let index_val = lval.indices[0].process_to_ir(func_data, bb, var_map, func_map);
-                    let elem_ptr = func_data.dfg_mut().new_value().get_elem_ptr(src, index_val);
-                    func_data
-                        .layout_mut()
-                        .bb_mut(*bb)
-                        .insts_mut()
-                        .push_key_back(elem_ptr)
-                        .unwrap();
-                    let load_inst = func_data.dfg_mut().new_value().load(elem_ptr);
+                    let ptr = emit_lval_ptr(func_data, bb, var_map, func_map, lval);
+                    let load_inst = func_data.dfg_mut().new_value().load(ptr);
                     func_data
                         .layout_mut()
                         .bb_mut(*bb)
@@ -97,8 +179,42 @@ fn process_to_ir_call(
 ) -> Value {
     let mut args_values = Vec::with_capacity(args.len());
     for arg in args {
-        let value = arg.process_to_ir(func_data, bb, var_map, func_map);
-        args_values.push(value);
+        match arg {
+            Exp::Var(name) => {
+                if let Some(ptr_arg) = maybe_decay_array_arg(func_data, bb, var_map, name) {
+                    args_values.push(ptr_arg);
+                } else {
+                    let value = arg.process_to_ir(func_data, bb, var_map, func_map);
+                    args_values.push(value);
+                }
+            }
+            Exp::LVal(lval) => {
+                if !lval.indices.is_empty() {
+                    let ptr = emit_lval_ptr(func_data, bb, var_map, func_map, lval);
+                    let ptr_ty = func_data.dfg().value(ptr).ty().clone();
+                    if let TypeKind::Pointer(inner) = ptr_ty.kind() {
+                        if matches!(inner.kind(), TypeKind::Array(_, _)) {
+                            let zero = func_data.dfg_mut().new_value().integer(0);
+                            let decayed = func_data.dfg_mut().new_value().get_elem_ptr(ptr, zero);
+                            func_data
+                                .layout_mut()
+                                .bb_mut(*bb)
+                                .insts_mut()
+                                .push_key_back(decayed)
+                                .unwrap();
+                            args_values.push(decayed);
+                            continue;
+                        }
+                    }
+                }
+                let value = arg.process_to_ir(func_data, bb, var_map, func_map);
+                args_values.push(value);
+            }
+            _ => {
+                let value = arg.process_to_ir(func_data, bb, var_map, func_map);
+                args_values.push(value);
+            }
+        }
     }
 
     let callee = *func_map

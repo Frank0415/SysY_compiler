@@ -233,6 +233,14 @@ impl Debug for FuncDef {
 
 impl Debug for FuncFParam {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?} {}", self.bt, self.id)
+        if self.is_array {
+            write!(f, "{:?} {}[]", self.bt, self.id)?;
+            for len in &self.array_lens {
+                write!(f, "[{:?}]", len)?;
+            }
+            Ok(())
+        } else {
+            write!(f, "{:?} {}", self.bt, self.id)
+        }
     }
 }

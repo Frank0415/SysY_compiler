@@ -46,6 +46,8 @@ pub enum RawType {
 pub struct FuncFParam {
     pub bt: RawType,
     pub id: String,
+    pub is_array: bool,
+    pub array_lens: Vec<ConstExp>,
 }
 
 #[derive(PartialEq)]

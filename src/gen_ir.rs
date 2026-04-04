@@ -1,6 +1,8 @@
 use crate::ast::Decl;
-use crate::ast::{Block, BlockItem, CompUnit, CompUnitItem, EvalExp, FuncDef, RawType, Stmt};
-use crate::gen_ir_exp::ProcessIr;
+use crate::ast::{
+    Block, BlockItem, CompUnit, CompUnitItem, EvalExp, FuncDef, FuncFParam, RawType, Stmt,
+};
+use crate::gen_ir_exp::{process_lval_to_ptr, ProcessIr};
 use crate::gen_ir_variables::{SymbolInfo, Variables};
 use koopa::ir::{builder_traits::*, types::*, *};
 use std::collections::HashMap;
@@ -22,7 +24,12 @@ pub fn gen_ir(cu: CompUnit) -> Result<Program, Error> {
             let params: Vec<(Option<String>, Type)> = fd
                 .func_params
                 .iter()
-                .map(|p| (Some(format!("%{}", p.id)), type_to_ir(&p.bt)))
+                .map(|p| {
+                    (
+                        Some(format!("%{}", p.id)),
+                        func_param_type_to_ir(p, &variable_maps),
+                    )
+                })
                 .collect();
 
             let func_name = format!("@{}", fd.ident);
@@ -57,6 +64,246 @@ pub fn gen_ir(cu: CompUnit) -> Result<Program, Error> {
     Ok(program)
 }
 
+fn eval_array_lens(lens: &[crate::ast::ConstExp], var_map: &Variables) -> Vec<usize> {
+    let mut dims = Vec::with_capacity(lens.len());
+    for len in lens {
+        let v = len.exp.eval_exp(var_map);
+        assert!(v > 0, "array length must be positive");
+        dims.push(v as usize);
+    }
+    dims
+}
+
+fn build_array_type(base_ty: Type, dims: &[usize]) -> Type {
+    let mut ty = base_ty;
+    for &d in dims.iter().rev() {
+        ty = Type::get_array(ty, d);
+    }
+    ty
+}
+
+fn func_param_type_to_ir(param: &FuncFParam, var_map: &Variables) -> Type {
+    let base = type_to_ir(&param.bt);
+    if !param.is_array {
+        base
+    } else {
+        let dims = eval_array_lens(&param.array_lens, var_map);
+        let elem_ty = build_array_type(base, &dims);
+        Type::get_pointer(elem_ty)
+    }
+}
+
+fn total_elems(dims: &[usize]) -> usize {
+    dims.iter().product()
+}
+
+fn suffix_product(dims: &[usize], start: usize) -> usize {
+    dims[start..].iter().product()
+}
+
+fn flatten_const_list_into(
+    items: &[crate::ast::ConstInitVal],
+    dims: &[usize],
+    var_map: &Variables,
+    out: &mut [i32],
+    cursor: &mut usize,
+    agg_start: usize,
+    agg_end: usize,
+) {
+    for item in items {
+        if *cursor >= agg_end {
+            panic!("too many elements in array initializer");
+        }
+        match item {
+            crate::ast::ConstInitVal::Exp(exp) => {
+                out[*cursor] = exp.exp.eval_exp(var_map);
+                *cursor += 1;
+            }
+            crate::ast::ConstInitVal::List(sub) => {
+                assert!(dims.len() > 1, "braces around scalar initializer");
+                let rel = *cursor - agg_start;
+                let mut chosen_k = None;
+                for k in 1..dims.len() {
+                    let block = suffix_product(dims, k);
+                    if rel % block == 0 {
+                        chosen_k = Some(k);
+                        break;
+                    }
+                }
+                let k = chosen_k.expect("initializer list is not aligned to array boundary");
+                let block = suffix_product(dims, k);
+                let sub_start = *cursor;
+                let sub_end = (sub_start + block).min(agg_end);
+                flatten_const_list_into(sub, &dims[k..], var_map, out, cursor, sub_start, sub_end);
+                *cursor = sub_end;
+            }
+        }
+    }
+}
+
+fn flatten_const_init(init: &crate::ast::ConstInitVal, dims: &[usize], var_map: &Variables) -> Vec<i32> {
+    let total = total_elems(dims);
+    let mut out = vec![0; total];
+    let mut cursor = 0usize;
+    match init {
+        crate::ast::ConstInitVal::Exp(_) => {
+            panic!("array initializer should be a list")
+        }
+        crate::ast::ConstInitVal::List(items) => {
+            flatten_const_list_into(items, dims, var_map, &mut out, &mut cursor, 0, total)
+        }
+    }
+    out
+}
+
+fn flatten_init_list_into<'a>(
+    items: &'a [crate::ast::InitVal],
+    dims: &[usize],
+    slots: &mut [Option<&'a crate::ast::Exp>],
+    cursor: &mut usize,
+    agg_start: usize,
+    agg_end: usize,
+) {
+    for item in items {
+        if *cursor >= agg_end {
+            panic!("too many elements in array initializer");
+        }
+        match item {
+            crate::ast::InitVal::Exp(exp) => {
+                slots[*cursor] = Some(exp);
+                *cursor += 1;
+            }
+            crate::ast::InitVal::List(sub) => {
+                assert!(dims.len() > 1, "braces around scalar initializer");
+                let rel = *cursor - agg_start;
+                let mut chosen_k = None;
+                for k in 1..dims.len() {
+                    let block = suffix_product(dims, k);
+                    if rel % block == 0 {
+                        chosen_k = Some(k);
+                        break;
+                    }
+                }
+                let k = chosen_k.expect("initializer list is not aligned to array boundary");
+                let block = suffix_product(dims, k);
+                let sub_start = *cursor;
+                let sub_end = (sub_start + block).min(agg_end);
+                flatten_init_list_into(sub, &dims[k..], slots, cursor, sub_start, sub_end);
+                *cursor = sub_end;
+            }
+        }
+    }
+}
+
+fn flatten_global_init_from_initval(
+    init: &crate::ast::InitVal,
+    dims: &[usize],
+    var_map: &Variables,
+) -> Vec<i32> {
+    let total = total_elems(dims);
+    let mut slots: Vec<Option<&crate::ast::Exp>> = vec![None; total];
+    let mut cursor = 0usize;
+    match init {
+        crate::ast::InitVal::Exp(_) => panic!("array initializer should be a list"),
+        crate::ast::InitVal::List(items) => {
+            flatten_init_list_into(items, dims, &mut slots, &mut cursor, 0, total)
+        }
+    }
+    slots
+        .into_iter()
+        .map(|slot| slot.map_or(0, |e| e.eval_exp(var_map)))
+        .collect()
+}
+
+fn build_global_aggregate_from_flat(
+    program: &mut Program,
+    dims: &[usize],
+    flat: &[i32],
+    cursor: &mut usize,
+) -> Value {
+    if dims.len() == 1 {
+        let mut elems = Vec::with_capacity(dims[0]);
+        for _ in 0..dims[0] {
+            elems.push(program.new_value().integer(flat[*cursor]));
+            *cursor += 1;
+        }
+        program.new_value().aggregate(elems)
+    } else {
+        let mut elems = Vec::with_capacity(dims[0]);
+        for _ in 0..dims[0] {
+            let sub = build_global_aggregate_from_flat(program, &dims[1..], flat, cursor);
+            elems.push(sub);
+        }
+        program.new_value().aggregate(elems)
+    }
+}
+
+fn linear_to_indices(mut pos: usize, dims: &[usize]) -> Vec<usize> {
+    let mut idx = vec![0; dims.len()];
+    for i in (0..dims.len()).rev() {
+        idx[i] = pos % dims[i];
+        pos /= dims[i];
+    }
+    idx
+}
+
+fn emit_ptr_at_linear_index(
+    func_data: &mut FunctionData,
+    bb: &mut BasicBlock,
+    base_ptr: Value,
+    dims: &[usize],
+    linear_idx: usize,
+) -> Value {
+    let mut ptr = base_ptr;
+    for i in linear_to_indices(linear_idx, dims) {
+        let idx_val = func_data.dfg_mut().new_value().integer(i as i32);
+        let elem_ptr = func_data.dfg_mut().new_value().get_elem_ptr(ptr, idx_val);
+        func_data
+            .layout_mut()
+            .bb_mut(*bb)
+            .insts_mut()
+            .push_key_back(elem_ptr)
+            .unwrap();
+        ptr = elem_ptr;
+    }
+    ptr
+}
+
+fn emit_local_array_init(
+    func_data: &mut FunctionData,
+    bb: &mut BasicBlock,
+    var_map: &mut Variables,
+    func_map: &HashMap<String, Function>,
+    alloc_ptr: Value,
+    dims: &[usize],
+    init: &crate::ast::InitVal,
+) {
+    let total = total_elems(dims);
+    let mut slots: Vec<Option<&crate::ast::Exp>> = vec![None; total];
+    let mut cursor = 0usize;
+    match init {
+        crate::ast::InitVal::Exp(_) => panic!("array variable expected list initializer"),
+        crate::ast::InitVal::List(items) => {
+            flatten_init_list_into(items, dims, &mut slots, &mut cursor, 0, total)
+        }
+    }
+
+    for (i, slot) in slots.into_iter().enumerate() {
+        let elem_ptr = emit_ptr_at_linear_index(func_data, bb, alloc_ptr, dims, i);
+        let val = match slot {
+            Some(exp) => exp.process_to_ir(func_data, bb, var_map, func_map),
+            None => func_data.dfg_mut().new_value().integer(0),
+        };
+        let st = func_data.dfg_mut().new_value().store(val, elem_ptr);
+        func_data
+            .layout_mut()
+            .bb_mut(*bb)
+            .insts_mut()
+            .push_key_back(st)
+            .unwrap();
+    }
+}
+
 fn process_global_decl(var_map: &mut Variables, program: &mut Program, decl: Decl) {
     match decl {
         Decl::Const(const_decl) => {
@@ -66,17 +313,23 @@ fn process_global_decl(var_map: &mut Variables, program: &mut Program, decl: Dec
                     "duplicate global symbol: {}",
                     def.ident
                 );
-                if !def.array_lens.is_empty() {
-                    // Lv9 array const handling is outside current IR scope.
-                    continue;
+                if def.array_lens.is_empty() {
+                    let val = match def.init_val {
+                        crate::ast::ConstInitVal::Exp(exp) => exp.exp.eval_exp(var_map),
+                        crate::ast::ConstInitVal::List(_) => {
+                            panic!("Scalar const expected scalar initializer")
+                        }
+                    };
+                    var_map.insert(def.ident, SymbolInfo::Const(val));
+                } else {
+                    let dims = eval_array_lens(&def.array_lens, var_map);
+                    let flat = flatten_const_init(&def.init_val, &dims, var_map);
+                    let mut cursor = 0usize;
+                    let agg = build_global_aggregate_from_flat(program, &dims, &flat, &mut cursor);
+                    let global_alloc = program.new_value().global_alloc(agg);
+                    program.set_value_name(global_alloc, Some(format!("@{}", def.ident)));
+                    var_map.insert(def.ident, SymbolInfo::Var(global_alloc));
                 }
-                let val = match def.init_val {
-                    crate::ast::ConstInitVal::Exp(exp) => exp.exp.eval_exp(var_map),
-                    crate::ast::ConstInitVal::List(_) => {
-                        panic!("Scalar const expected scalar initializer")
-                    }
-                };
-                var_map.insert(def.ident, SymbolInfo::Const(val));
             }
         }
         Decl::Var(var_decl) => {
@@ -90,35 +343,13 @@ fn process_global_decl(var_map: &mut Variables, program: &mut Program, decl: Dec
                 );
 
                 let alloc_init = if !def.array_lens.is_empty() {
-                    assert!(
-                        def.array_lens.len() == 1,
-                        "multi-dimensional arrays are not implemented in IR yet"
-                    );
-                    let len = def.array_lens[0].exp.eval_exp(var_map);
-                    assert!(len > 0, "array length must be positive");
-                    let arr_ty = Type::get_array(base_ty.clone(), len as usize);
+                    let dims = eval_array_lens(&def.array_lens, var_map);
+                    let arr_ty = build_array_type(base_ty.clone(), &dims);
                     match def.init_val {
-                        Some(crate::ast::InitVal::List(items)) => {
-                            let mut elems = Vec::new();
-                            for i in 0..(len as usize) {
-                                if i < items.len() {
-                                    let v = match &items[i] {
-                                        crate::ast::InitVal::Exp(exp) => exp.eval_exp(var_map),
-                                        crate::ast::InitVal::List(_) => {
-                                            panic!(
-                                                "multi-dimensional array initializer is not implemented in IR yet"
-                                            )
-                                        }
-                                    };
-                                    elems.push(program.new_value().integer(v));
-                                } else {
-                                    elems.push(program.new_value().integer(0));
-                                }
-                            }
-                            program.new_value().aggregate(elems)
-                        }
-                        Some(crate::ast::InitVal::Exp(_)) => {
-                            panic!("array variable expected list initializer")
+                        Some(init) => {
+                            let flat = flatten_global_init_from_initval(&init, &dims, var_map);
+                            let mut cursor = 0usize;
+                            build_global_aggregate_from_flat(program, &dims, &flat, &mut cursor)
                         }
                         None => program.new_value().zero_init(arr_ty),
                     }
@@ -203,9 +434,6 @@ fn process_func(
         func_type,
     } = func_def;
 
-    let param_defs: Vec<(String, RawType)> =
-        func_params.into_iter().map(|p| (p.id, p.bt)).collect();
-
     let func = *func_map
         .get(&ident)
         .unwrap_or_else(|| panic!("Undefined function: {}", ident));
@@ -226,12 +454,16 @@ fn process_func(
         .push_key_back(entry)
         .unwrap();
 
-    for (i, (id, bt)) in param_defs.iter().enumerate() {
+    for (i, p) in func_params.iter().enumerate() {
+        let id = &p.id;
         assert!(
             !var_map.contains_in_current_scope(id),
             "duplicate parameter name in function scope"
         );
-        let ptr = func_data.dfg_mut().new_value().alloc(type_to_ir(bt));
+        let ptr = func_data
+            .dfg_mut()
+            .new_value()
+            .alloc(func_param_type_to_ir(p, var_map));
         func_data
             .layout_mut()
             .bb_mut(entry)
@@ -292,25 +524,54 @@ fn process_block_item(
 ) -> BasicBlock {
     match item {
         BlockItem::Decl(Decl::Const(decl)) => {
-            let _typ = type_to_ir(&decl.typ);
+            let base_ty = type_to_ir(&decl.typ);
+            let mut current_bb = bb;
             for def in decl.defs {
                 let id = def.ident;
                 assert!(
                     !var_map.contains_in_current_scope(&id),
                     "Should not declare a constant multiple times in the same scope!"
                 );
-                if !def.array_lens.is_empty() {
-                    continue;
-                }
-                let val = match def.init_val {
-                    crate::ast::ConstInitVal::Exp(exp) => exp.exp.eval_exp(var_map),
-                    crate::ast::ConstInitVal::List(_) => {
-                        panic!("Scalar const expected scalar initializer")
+                if def.array_lens.is_empty() {
+                    let val = match def.init_val {
+                        crate::ast::ConstInitVal::Exp(exp) => exp.exp.eval_exp(var_map),
+                        crate::ast::ConstInitVal::List(_) => {
+                            panic!("Scalar const expected scalar initializer")
+                        }
+                    };
+                    var_map.insert(id, SymbolInfo::Const(val));
+                } else {
+                    let dims = eval_array_lens(&def.array_lens, var_map);
+                    let alloc_ty = build_array_type(base_ty.clone(), &dims);
+                    let alloc_ptr = func_data.dfg_mut().new_value().alloc(alloc_ty);
+                    let unique_id = var_map.get_id();
+                    func_data
+                        .dfg_mut()
+                        .set_value_name(alloc_ptr, Some(format!("@{}_{}", id, unique_id)));
+                    func_data
+                        .layout_mut()
+                        .bb_mut(current_bb)
+                        .insts_mut()
+                        .push_key_back(alloc_ptr)
+                        .unwrap();
+
+                    let flat = flatten_const_init(&def.init_val, &dims, var_map);
+                    for (i, v) in flat.into_iter().enumerate() {
+                        let elem_ptr =
+                            emit_ptr_at_linear_index(func_data, &mut current_bb, alloc_ptr, &dims, i);
+                        let val = func_data.dfg_mut().new_value().integer(v);
+                        let st = func_data.dfg_mut().new_value().store(val, elem_ptr);
+                        func_data
+                            .layout_mut()
+                            .bb_mut(current_bb)
+                            .insts_mut()
+                            .push_key_back(st)
+                            .unwrap();
                     }
-                };
-                var_map.insert(id, SymbolInfo::Const(val));
+                    var_map.insert(id, SymbolInfo::Var(alloc_ptr));
+                }
             }
-            bb
+            current_bb
         }
         BlockItem::Decl(Decl::Var(decl)) => {
             let base_ty = type_to_ir(&decl.typ);
@@ -321,14 +582,9 @@ fn process_block_item(
                     !var_map.contains_in_current_scope(&id),
                     "Should not declare a variable multiple times in the same scope!"
                 );
-                let alloc_ty = if !def.array_lens.is_empty() {
-                    assert!(
-                        def.array_lens.len() == 1,
-                        "multi-dimensional arrays are not implemented in IR yet"
-                    );
-                    let len = def.array_lens[0].exp.eval_exp(var_map);
-                    assert!(len > 0, "array length must be positive");
-                    Type::get_array(base_ty.clone(), len as usize)
+                let dims = eval_array_lens(&def.array_lens, var_map);
+                let alloc_ty = if !dims.is_empty() {
+                    build_array_type(base_ty.clone(), &dims)
                 } else {
                     base_ty.clone()
                 };
@@ -346,70 +602,37 @@ fn process_block_item(
                     .unwrap();
 
                 if let Some(init_val) = def.init_val {
-                    match (def.array_lens, init_val) {
-                        (lens, crate::ast::InitVal::List(items)) if !lens.is_empty() => {
-                            assert!(
-                                lens.len() == 1,
-                                "multi-dimensional arrays are not implemented in IR yet"
-                            );
-                            let len = lens[0].exp.eval_exp(var_map);
-                            for i in 0..(len as usize) {
-                                let idx_val = func_data.dfg_mut().new_value().integer(i as i32);
-                                let elem_ptr = func_data
-                                    .dfg_mut()
-                                    .new_value()
-                                    .get_elem_ptr(alloc_ptr, idx_val);
+                    if !dims.is_empty() {
+                        emit_local_array_init(
+                            func_data,
+                            &mut current_bb,
+                            var_map,
+                            func_map,
+                            alloc_ptr,
+                            &dims,
+                            &init_val,
+                        );
+                    } else {
+                        match init_val {
+                            crate::ast::InitVal::Exp(exp) => {
+                                let val = exp.process_to_ir(
+                                    func_data,
+                                    &mut current_bb,
+                                    var_map,
+                                    func_map,
+                                );
+                                let store_inst = func_data.dfg_mut().new_value().store(val, alloc_ptr);
                                 func_data
                                     .layout_mut()
                                     .bb_mut(current_bb)
                                     .insts_mut()
-                                    .push_key_back(elem_ptr)
-                                    .unwrap();
-
-                                let init_elem = if i < items.len() {
-                                    match &items[i] {
-                                        crate::ast::InitVal::Exp(exp) => exp.process_to_ir(
-                                            func_data,
-                                            &mut current_bb,
-                                            var_map,
-                                            func_map,
-                                        ),
-                                        crate::ast::InitVal::List(_) => {
-                                            panic!(
-                                                "multi-dimensional array initializer is not implemented in IR yet"
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    func_data.dfg_mut().new_value().integer(0)
-                                };
-                                let st = func_data.dfg_mut().new_value().store(init_elem, elem_ptr);
-                                func_data
-                                    .layout_mut()
-                                    .bb_mut(current_bb)
-                                    .insts_mut()
-                                    .push_key_back(st)
+                                    .push_key_back(store_inst)
                                     .unwrap();
                             }
+                            crate::ast::InitVal::List(_) => {
+                                panic!("Scalar variable expected scalar initializer")
+                            }
                         }
-                        (lens, crate::ast::InitVal::Exp(_)) if !lens.is_empty() => {
-                            panic!("Array variable expected list initializer")
-                        }
-                        (lens, crate::ast::InitVal::Exp(exp)) if lens.is_empty() => {
-                            let val =
-                                exp.process_to_ir(func_data, &mut current_bb, var_map, func_map);
-                            let store_inst = func_data.dfg_mut().new_value().store(val, alloc_ptr);
-                            func_data
-                                .layout_mut()
-                                .bb_mut(current_bb)
-                                .insts_mut()
-                                .push_key_back(store_inst)
-                                .unwrap();
-                        }
-                        (lens, crate::ast::InitVal::List(_)) if lens.is_empty() => {
-                            panic!("Scalar variable expected scalar initializer")
-                        }
-                        _ => unreachable!(),
                     }
                 }
                 var_map.insert(id, SymbolInfo::Var(alloc_ptr));
@@ -433,27 +656,7 @@ fn process_stmt(
             let val = exp.process_to_ir(func_data, &mut current_bb, var_map, func_map);
             if let Some(dest_base) = var_map.get(&lval.ident) {
                 let dest = if !lval.indices.is_empty() {
-                    assert!(
-                        lval.indices.len() == 1,
-                        "multi-dimensional arrays are not implemented in IR yet"
-                    );
-                    let index_val = lval.indices[0].process_to_ir(
-                        func_data,
-                        &mut current_bb,
-                        var_map,
-                        func_map,
-                    );
-                    let elem_ptr = func_data
-                        .dfg_mut()
-                        .new_value()
-                        .get_elem_ptr(dest_base, index_val);
-                    func_data
-                        .layout_mut()
-                        .bb_mut(current_bb)
-                        .insts_mut()
-                        .push_key_back(elem_ptr)
-                        .unwrap();
-                    elem_ptr
+                    process_lval_to_ptr(func_data, &mut current_bb, var_map, func_map, &lval)
                 } else {
                     dest_base
                 };
