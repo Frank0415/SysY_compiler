@@ -2,7 +2,7 @@ use crate::ast::Decl;
 use crate::ast::{
     Block, BlockItem, CompUnit, CompUnitItem, EvalExp, FuncDef, FuncFParam, RawType, Stmt,
 };
-use crate::gen_ir_exp::{process_lval_to_ptr, ProcessIr};
+use crate::gen_ir_exp::{ProcessIr, process_lval_to_ptr};
 use crate::gen_ir_variables::{SymbolInfo, Variables};
 use koopa::ir::{builder_traits::*, types::*, *};
 use std::collections::HashMap;
@@ -141,7 +141,11 @@ fn flatten_const_list_into(
     }
 }
 
-fn flatten_const_init(init: &crate::ast::ConstInitVal, dims: &[usize], var_map: &Variables) -> Vec<i32> {
+fn flatten_const_init(
+    init: &crate::ast::ConstInitVal,
+    dims: &[usize],
+    var_map: &Variables,
+) -> Vec<i32> {
     let total = total_elems(dims);
     let mut out = vec![0; total];
     let mut cursor = 0usize;
@@ -557,8 +561,13 @@ fn process_block_item(
 
                     let flat = flatten_const_init(&def.init_val, &dims, var_map);
                     for (i, v) in flat.into_iter().enumerate() {
-                        let elem_ptr =
-                            emit_ptr_at_linear_index(func_data, &mut current_bb, alloc_ptr, &dims, i);
+                        let elem_ptr = emit_ptr_at_linear_index(
+                            func_data,
+                            &mut current_bb,
+                            alloc_ptr,
+                            &dims,
+                            i,
+                        );
                         let val = func_data.dfg_mut().new_value().integer(v);
                         let st = func_data.dfg_mut().new_value().store(val, elem_ptr);
                         func_data
@@ -621,7 +630,8 @@ fn process_block_item(
                                     var_map,
                                     func_map,
                                 );
-                                let store_inst = func_data.dfg_mut().new_value().store(val, alloc_ptr);
+                                let store_inst =
+                                    func_data.dfg_mut().new_value().store(val, alloc_ptr);
                                 func_data
                                     .layout_mut()
                                     .bb_mut(current_bb)

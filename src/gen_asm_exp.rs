@@ -360,6 +360,14 @@ pub fn process_alloc_inst() -> String {
     String::new()
 }
 
+fn local_value_kind<'a>(dfg: &'a DataFlowGraph, value: Value) -> Option<&'a ValueKind> {
+    if dfg.values().contains_key(&value) {
+        Some(dfg.value(value).kind())
+    } else {
+        None
+    }
+}
+
 fn load_pointer_base(
     src: Value,
     base_reg: &str,
@@ -370,7 +378,7 @@ fn load_pointer_base(
     match reg_alloc.get_variable(&src) {
         VariableLocation::Register(reg) => format!("\tmv {}, {}\n", base_reg, reg),
         VariableLocation::Stack(offset) => {
-            if matches!(dfg.value(src).kind(), ValueKind::Alloc(_)) {
+            if matches!(local_value_kind(dfg, src), Some(ValueKind::Alloc(_))) {
                 emit_addr_from_sp(base_reg, offset)
             } else {
                 emit_load_from_sp(base_reg, offset, reg_alloc)
@@ -484,8 +492,8 @@ pub fn process_load_inst(
     let src = load.src();
 
     let val_tmp = reg_alloc.acquire_scratch();
-    match dfg.value(src).kind() {
-        ValueKind::Alloc(_) => {
+    match local_value_kind(dfg, src) {
+        Some(ValueKind::Alloc(_)) => {
             let src_offset = match reg_alloc.get_variable(&src) {
                 VariableLocation::Stack(offset) => offset,
                 _ => panic!("Alloc source should be stack allocated"),
@@ -521,7 +529,7 @@ pub fn process_store_inst(
     let dest = store.dest();
     let val_reg = reg_alloc.acquire_scratch();
 
-    if let koopa::ir::ValueKind::Integer(int) = dfg.value(val).kind() {
+    if let Some(koopa::ir::ValueKind::Integer(int)) = local_value_kind(dfg, val) {
         let v = int.value();
         if v == 0 {
             ret += &format!("\tmv {}, x0\n", val_reg);
@@ -529,8 +537,8 @@ pub fn process_store_inst(
             ret += &format!("\tli {}, {}\n", val_reg, v);
         }
     } else {
-        match dfg.value(val).kind() {
-            ValueKind::FuncArgRef(arg_ref) => {
+        match local_value_kind(dfg, val) {
+            Some(ValueKind::FuncArgRef(arg_ref)) => {
                 let idx = arg_ref.index();
                 if idx < 8 {
                     ret += &format!("\tmv {}, a{}\n", val_reg, idx);
@@ -546,13 +554,15 @@ pub fn process_store_inst(
                 VariableLocation::Stack(offset) => {
                     ret += &emit_load_from_sp(&val_reg, offset, reg_alloc);
                 }
-                VariableLocation::None => panic!("Store value has neither register nor stack slot"),
+                VariableLocation::None => {
+                    ret += &load_pointer_base(val, &val_reg, dfg, reg_alloc, global_names);
+                }
             },
         }
     }
 
-    match dfg.value(dest).kind() {
-        ValueKind::Alloc(_) => {
+    match local_value_kind(dfg, dest) {
+        Some(ValueKind::Alloc(_)) => {
             let dest_offset = match reg_alloc.get_variable(&dest) {
                 VariableLocation::Stack(offset) => offset,
                 _ => panic!("Alloc destination should be stack allocated"),

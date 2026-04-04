@@ -34,17 +34,16 @@ fn main() -> Result<()> {
         }
     };
 
-    // 输出解析得到的 AST
-    println!("{:#?}", ast);
     let program = gen_ir(ast).unwrap();
-    let text_form_ir = gen_text_ir(&program);
-    println!("{}", text_form_ir);
-    let asm = program.gen_asm().unwrap();
-    println!("{}", asm);
-    if mode == "-riscv" {
-        write(output, asm)?;
-    } else if mode == "-koopa" {
+    if mode == "-koopa" {
+        let text_form_ir = gen_text_ir(&program);
         write(output, text_form_ir)?;
+    } else if mode == "-riscv" {
+        let asm = program.gen_asm().unwrap();
+        write(output, asm)?;
+    } else {
+        eprintln!("Unsupported mode: {}", mode);
+        exit(1);
     }
 
     Ok(())
