@@ -95,11 +95,22 @@ ConstDecl: ConstDecl = {
 
 // 单个常量定义：标识符 = 初始化值
 ConstDef: ConstDef =
-    <ident: Ident> "=" <init_val: ConstInitVal>
-    => ConstDef { ident, init_val };
+    <ident: Ident> <array_len: ("[" <ConstExp> "]")?> "=" <init_val: ConstInitVal>
+    => ConstDef { ident, array_len, init_val };
 
-// 常量初始化值（目前就是常量表达式）
-ConstInitVal: ConstExp = <exp: ConstExp> => exp;
+ConstInitValList: Vec<ConstExp> = {
+    <head: ConstExp> <tail: ("," <ConstExp>)*> => {
+        let mut vals = vec![head];
+        vals.extend(tail);
+        vals
+    }
+};
+
+// 常量初始化值
+ConstInitVal: ConstInitVal = {
+    <exp: ConstExp> => ConstInitVal::Exp(exp),
+    "{" <vals: ConstInitValList?> "}" => ConstInitVal::List(vals.unwrap_or_default()),
+};
 
 // 常量表达式（语法上等同于普通表达式，语义检查阶段才验证是否为常量）
 ConstExp: ConstExp = <exp: Exp> => ConstExp { exp };
@@ -113,13 +124,24 @@ VarDecl: VarDecl = {
 }
 
 VarDef: VarDef = {
-    <ident: Ident> "=" <init_val: VarExp>
-        => VarDef { ident, init_val: Some(init_val) },
-    <ident: Ident>
-        => VarDef { ident, init_val: None },
+    <ident: Ident> <array_len: ("[" <ConstExp> "]")?> "=" <init_val: InitVal>
+        => VarDef { ident, array_len, init_val: Some(init_val) },
+    <ident: Ident> <array_len: ("[" <ConstExp> "]")?>
+        => VarDef { ident, array_len, init_val: None },
 };
 
-VarExp: VarExp = <exp: Exp> => VarExp { exp };
+InitValList: Vec<Exp> = {
+    <head: Exp> <tail: ("," <Exp>)*> => {
+        let mut vals = vec![head];
+        vals.extend(tail);
+        vals
+    }
+};
+
+InitVal: InitVal = {
+    <exp: Exp> => InitVal::Exp(exp),
+    "{" <vals: InitValList?> "}" => InitVal::List(vals.unwrap_or_default()),
+};
 
 // 基本类型（用于变量/常量声明）
 RawType: RawType = {
@@ -148,7 +170,7 @@ Stmt: Stmt = {
 };
 
 MatchedStmt: Stmt = {
-    <id: Ident> "=" <exp: Exp> ";" => Stmt::Assign { lval: id, exp },
+    <lval: LVal> "=" <exp: Exp> ";" => Stmt::Assign { lval, exp },
     <exp: Exp?> ";" => Stmt::Exp(exp),
     <block: Block> => Stmt::Block(block),
     "return" <exp: Exp?> ";" => Stmt::Return(exp),
@@ -261,7 +283,18 @@ UnaryExp: Exp = {
 PrimaryExp: Exp = {
     "(" <exp: Exp> ")" => exp,           // 括号改变优先级
     <num: Number> => num,
-    <id: Ident> => Exp::Var(id),         // 变量引用
+    <lv: LVal> => {
+        if lv.index.is_none() {
+            Exp::Var(lv.ident)
+        } else {
+            Exp::LVal(lv)
+        }
+    },
+};
+
+LVal: LVal = <ident: Ident> <index: ("[" <Exp> "]")?> => LVal {
+    ident,
+    index: index.map(Box::new),
 };
 
 // 一元运算符

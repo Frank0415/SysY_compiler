@@ -6,6 +6,7 @@ impl Debug for Exp {
         match self {
             Exp::Number(n) => write!(f, "{}", n),
             Exp::Var(s) => write!(f, "{}", s),
+            Exp::LVal(lv) => write!(f, "{:?}", lv),
             Exp::Unary { op, exp } => write!(f, "({:?} {:?})", op, exp),
             Exp::Binary { op, lhs, rhs } => write!(f, "({:?} {:?} {:?})", lhs, op, rhs),
             Exp::Call { ident, args } => {
@@ -56,7 +57,7 @@ impl Debug for Stmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Stmt::Block(block) => write!(f, "{{ {:?} }}", block),
-            Stmt::Assign { lval, exp } => write!(f, "{} = {:?};", lval, exp),
+            Stmt::Assign { lval, exp } => write!(f, "{:?} = {:?};", lval, exp),
             Stmt::Exp(Some(exp)) => write!(f, "{:?};", exp),
             Stmt::Exp(None) => write!(f, ";"),
             Stmt::Return(Some(exp)) => write!(f, "return {:?};", exp),
@@ -126,7 +127,19 @@ impl Debug for ConstDecl {
 
 impl Debug for ConstDef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {:?}", self.ident, self.init_val)
+        match &self.array_len {
+            Some(len) => write!(f, "{}[{:?}] = {:?}", self.ident, len, self.init_val),
+            None => write!(f, "{} = {:?}", self.ident, self.init_val),
+        }
+    }
+}
+
+impl Debug for ConstInitVal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConstInitVal::Exp(exp) => write!(f, "{:?}", exp),
+            ConstInitVal::List(list) => write!(f, "{:?}", list),
+        }
     }
 }
 
@@ -144,16 +157,32 @@ impl Debug for VarDecl {
 
 impl Debug for VarDef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match &self.array_len {
+            Some(len) => format!("{}[{:?}]", self.ident, len),
+            None => self.ident.clone(),
+        };
         match &self.init_val {
-            None => write!(f, "{}, no evaluation!", self.ident),
-            Some(varexp) => write!(f, "{} = {:?}", self.ident, varexp),
+            None => write!(f, "{}, no evaluation!", name),
+            Some(init_val) => write!(f, "{} = {:?}", name, init_val),
         }
     }
 }
 
-impl Debug for VarExp {
+impl Debug for InitVal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.exp)
+        match self {
+            InitVal::Exp(exp) => write!(f, "{:?}", exp),
+            InitVal::List(list) => write!(f, "{:?}", list),
+        }
+    }
+}
+
+impl Debug for LVal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.index {
+            Some(exp) => write!(f, "{}[{:?}]", self.ident, exp),
+            None => write!(f, "{}", self.ident),
+        }
     }
 }
 

@@ -51,7 +51,7 @@ pub struct FuncFParam {
 #[derive(PartialEq)]
 pub enum Stmt {
     Block(Block),
-    Assign { lval: String, exp: Exp },
+    Assign { lval: LVal, exp: Exp },
     Exp(Option<Exp>),    // 新增：[Exp] ";" 语句（若为 None 则是单独的空分号 ";"）
     Return(Option<Exp>), // 修改：将 Return(Exp) 改为返回 Option<Exp>，支持 "return;"
     IF(Box<IF>),
@@ -79,6 +79,7 @@ pub struct WHILE {
 pub enum Exp {
     Number(i32),
     Var(String), // 变量/常量引用
+    LVal(LVal),
     Unary {
         op: UnaryOp,
         exp: Box<Exp>,
@@ -92,6 +93,12 @@ pub enum Exp {
         ident: String,
         args: Vec<Exp>,
     },
+}
+
+#[derive(PartialEq)]
+pub struct LVal {
+    pub ident: String,
+    pub index: Option<Box<Exp>>,
 }
 
 #[derive(PartialEq)]
@@ -144,8 +151,16 @@ pub struct ConstDecl {
 #[derive(PartialEq)]
 pub struct ConstDef {
     pub ident: String,
-    pub init_val: ConstExp,
+    pub array_len: Option<ConstExp>,
+    pub init_val: ConstInitVal,
 }
+
+#[derive(PartialEq)]
+pub enum ConstInitVal {
+    Exp(ConstExp),
+    List(Vec<ConstExp>),
+}
+
 #[derive(PartialEq)]
 pub struct ConstExp {
     pub exp: Exp,
@@ -159,7 +174,8 @@ pub struct VarDecl {
 #[derive(PartialEq)]
 pub struct VarDef {
     pub ident: String,
-    pub init_val: Option<VarExp>,
+    pub array_len: Option<ConstExp>,
+    pub init_val: Option<InitVal>,
 }
 // #[derive(PartialEq)]
 // pub struct VarHasDef {
@@ -167,8 +183,9 @@ pub struct VarDef {
 //     pub init_val: VarExp,
 // }
 #[derive(PartialEq)]
-pub struct VarExp {
-    pub exp: Exp,
+pub enum InitVal {
+    Exp(Exp),
+    List(Vec<Exp>),
 }
 
 pub trait EvalExp {
@@ -194,6 +211,14 @@ impl EvalExp for Exp {
                 }
             }
             Exp::Var(name) => var_map.get_const(name).expect("Undefined constant"),
+            Exp::LVal(lv) => {
+                if lv.index.is_some() {
+                    panic!("Indexed lvalue should not be evaluated at compile time")
+                }
+                var_map
+                    .get_const(&lv.ident)
+                    .expect("Undefined constant")
+            }
             Exp::Binary { op, lhs, rhs } => {
                 let l = lhs.eval_exp(var_map);
                 let r = rhs.eval_exp(var_map);

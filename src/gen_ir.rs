@@ -68,7 +68,16 @@ fn process_global_decl(var_map: &mut Variables, program: &mut Program, decl: Dec
                     "duplicate global symbol: {}",
                     def.ident
                 );
-                let val = def.init_val.exp.eval_exp(var_map);
+                if def.array_len.is_some() {
+                    // Lv9 array const handling is outside current IR scope.
+                    continue;
+                }
+                let val = match def.init_val {
+                    crate::ast::ConstInitVal::Exp(exp) => exp.exp.eval_exp(var_map),
+                    crate::ast::ConstInitVal::List(_) => {
+                        panic!("Scalar const expected scalar initializer")
+                    }
+                };
                 var_map.insert(def.ident, SymbolInfo::Const(val));
             }
         }
@@ -82,8 +91,17 @@ fn process_global_decl(var_map: &mut Variables, program: &mut Program, decl: Dec
                     def.ident
                 );
 
+                if def.array_len.is_some() {
+                    unimplemented!("Global array IR generation is not implemented yet");
+                }
+
                 let init = if let Some(init_val) = def.init_val {
-                    let val = init_val.exp.eval_exp(var_map);
+                    let val = match init_val {
+                        crate::ast::InitVal::Exp(exp) => exp.eval_exp(var_map),
+                        crate::ast::InitVal::List(_) => {
+                            panic!("Scalar variable expected scalar initializer")
+                        }
+                    };
                     program.new_value().integer(val)
                 } else {
                     program.new_value().zero_init(ty.clone())
@@ -249,7 +267,15 @@ fn process_block_item(
                     !var_map.contains_in_current_scope(&id),
                     "Should not declare a constant multiple times in the same scope!"
                 );
-                let val = def.init_val.exp.eval_exp(var_map);
+                if def.array_len.is_some() {
+                    continue;
+                }
+                let val = match def.init_val {
+                    crate::ast::ConstInitVal::Exp(exp) => exp.exp.eval_exp(var_map),
+                    crate::ast::ConstInitVal::List(_) => {
+                        panic!("Scalar const expected scalar initializer")
+                    }
+                };
                 var_map.insert(id, SymbolInfo::Const(val));
             }
             bb
@@ -263,6 +289,10 @@ fn process_block_item(
                     !var_map.contains_in_current_scope(&id),
                     "Should not declare a variable multiple times in the same scope!"
                 );
+                if def.array_len.is_some() {
+                    unimplemented!("Local array IR generation is not implemented yet");
+                }
+
                 let alloc_ptr = func_data.dfg_mut().new_value().alloc(typ.clone());
                 let unique_id = var_map.get_id();
                 func_data
@@ -275,9 +305,14 @@ fn process_block_item(
                     .push_key_back(alloc_ptr)
                     .unwrap();
                 if let Some(init_val) = def.init_val {
-                    let val = init_val
-                        .exp
-                        .process_to_ir(func_data, &mut current_bb, var_map, func_map);
+                    let val = match init_val {
+                        crate::ast::InitVal::Exp(exp) => {
+                            exp.process_to_ir(func_data, &mut current_bb, var_map, func_map)
+                        }
+                        crate::ast::InitVal::List(_) => {
+                            panic!("Scalar variable expected scalar initializer")
+                        }
+                    };
                     let store_inst = func_data.dfg_mut().new_value().store(val, alloc_ptr);
                     func_data
                         .layout_mut()
@@ -305,7 +340,10 @@ fn process_stmt(
         Stmt::Assign { lval, exp } => {
             let mut current_bb = bb;
             let val = exp.process_to_ir(func_data, &mut current_bb, var_map, func_map);
-            if let Some(dest) = var_map.get(&lval) {
+            if lval.index.is_some() {
+                unimplemented!("Array element assignment IR generation is not implemented yet");
+            }
+            if let Some(dest) = var_map.get(&lval.ident) {
                 let store_inst = func_data.dfg_mut().new_value().store(val, dest);
                 func_data
                     .layout_mut()
@@ -314,7 +352,7 @@ fn process_stmt(
                     .push_key_back(store_inst)
                     .unwrap();
             } else {
-                panic!("Undefined variable: {}", lval);
+                panic!("Undefined variable: {}", lval.ident);
             }
             current_bb
         }

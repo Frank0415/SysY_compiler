@@ -30,6 +30,12 @@ impl ProcessIr for Exp {
                 process_to_ir_binary(func_data, bb, op, lhs, rhs, var_map, func_map)
             }
             Exp::Var(variable) => process_to_ir_variable(func_data, bb, variable, var_map),
+            Exp::LVal(lval) => {
+                if lval.index.is_some() {
+                    unimplemented!("Array element access IR generation is not implemented yet");
+                }
+                process_to_ir_variable(func_data, bb, &lval.ident, var_map)
+            }
             Exp::Call { ident, args } => {
                 process_to_ir_call(func_data, bb, var_map, func_map, ident, args)
             }
