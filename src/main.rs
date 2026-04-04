@@ -1,13 +1,13 @@
 use compiler::gen_asm::GenAsm;
-use compiler::gen_ir::{gen_ir};
+use compiler::gen_ir::gen_ir;
 use compiler::sysy;
 
+use koopa::back::KoopaGenerator;
+use koopa::ir::{Program, Type};
 use std::env::args;
 use std::fs::{read_to_string, write};
 use std::io::Result;
 use std::process::exit;
-use koopa::back::KoopaGenerator;
-use koopa::ir::{Program, Type};
 
 fn main() -> Result<()> {
     Type::set_ptr_size(4);
@@ -54,4 +54,3 @@ pub fn gen_text_ir(ir: &Program) -> String {
     g.generate_on(ir).unwrap();
     std::str::from_utf8(&g.writer()).unwrap().to_string()
 }
-
