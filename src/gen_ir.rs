@@ -1,7 +1,5 @@
 use crate::ast::Decl;
-use crate::ast::{
-    Block, BlockItem, CompUnit, CompUnitItem, EvalExp, FuncDef, RawType, Stmt,
-};
+use crate::ast::{Block, BlockItem, CompUnit, CompUnitItem, EvalExp, FuncDef, RawType, Stmt};
 use crate::gen_ir_exp::ProcessIr;
 use crate::gen_ir_variables::{SymbolInfo, Variables};
 use koopa::ir::{builder_traits::*, types::*, *};
@@ -82,8 +80,8 @@ fn process_global_decl(var_map: &mut Variables, program: &mut Program, decl: Dec
             }
         }
         Decl::Var(var_decl) => {
-            let ty = type_to_ir(&var_decl.typ);
-            assert!(!ty.is_unit(), "global variable type cannot be void");
+            let base_ty = type_to_ir(&var_decl.typ);
+            assert!(!base_ty.is_unit(), "global variable type cannot be void");
             for def in var_decl.defs {
                 assert!(
                     !var_map.contains_in_current_scope(&def.ident),
@@ -91,11 +89,30 @@ fn process_global_decl(var_map: &mut Variables, program: &mut Program, decl: Dec
                     def.ident
                 );
 
-                if def.array_len.is_some() {
-                    unimplemented!("Global array IR generation is not implemented yet");
-                }
-
-                let init = if let Some(init_val) = def.init_val {
+                let alloc_init = if let Some(len_exp) = def.array_len {
+                    let len = len_exp.exp.eval_exp(var_map);
+                    assert!(len > 0, "array length must be positive");
+                    let arr_ty = Type::get_array(base_ty.clone(), len as usize);
+                    match def.init_val {
+                        Some(crate::ast::InitVal::List(items)) => {
+                            let mut elems = Vec::new();
+                            for i in 0..(len as usize) {
+                                if i < items.len() {
+                                    elems.push(
+                                        program.new_value().integer(items[i].eval_exp(var_map)),
+                                    );
+                                } else {
+                                    elems.push(program.new_value().integer(0));
+                                }
+                            }
+                            program.new_value().aggregate(elems)
+                        }
+                        Some(crate::ast::InitVal::Exp(_)) => {
+                            panic!("array variable expected list initializer")
+                        }
+                        None => program.new_value().zero_init(arr_ty),
+                    }
+                } else if let Some(init_val) = def.init_val {
                     let val = match init_val {
                         crate::ast::InitVal::Exp(exp) => exp.eval_exp(var_map),
                         crate::ast::InitVal::List(_) => {
@@ -104,10 +121,10 @@ fn process_global_decl(var_map: &mut Variables, program: &mut Program, decl: Dec
                     };
                     program.new_value().integer(val)
                 } else {
-                    program.new_value().zero_init(ty.clone())
+                    program.new_value().zero_init(base_ty.clone())
                 };
 
-                let global_alloc = program.new_value().global_alloc(init);
+                let global_alloc = program.new_value().global_alloc(alloc_init);
                 program.set_value_name(global_alloc, Some(format!("@{}", def.ident)));
                 var_map.insert(def.ident, SymbolInfo::Var(global_alloc));
             }
@@ -161,14 +178,19 @@ fn add_sysy_lib_decls(
     }
 }
 
-fn process_func(var_map: &mut Variables, prog: &mut Program, func_def: FuncDef, func_map: &HashMap<String, Function>) {
+fn process_func(
+    var_map: &mut Variables,
+    prog: &mut Program,
+    func_def: FuncDef,
+    func_map: &HashMap<String, Function>,
+) {
     var_map.enter_scope();
     // Pattern match the FuncDef to extract details
     let FuncDef {
         ident,
         func_params,
         block,
-                                                   func_type,
+        func_type,
     } = func_def;
 
     let param_defs: Vec<(String, RawType)> =
@@ -281,7 +303,7 @@ fn process_block_item(
             bb
         }
         BlockItem::Decl(Decl::Var(decl)) => {
-            let typ = type_to_ir(&decl.typ);
+            let base_ty = type_to_ir(&decl.typ);
             let mut current_bb = bb;
             for def in decl.defs {
                 let id = def.ident;
@@ -289,11 +311,15 @@ fn process_block_item(
                     !var_map.contains_in_current_scope(&id),
                     "Should not declare a variable multiple times in the same scope!"
                 );
-                if def.array_len.is_some() {
-                    unimplemented!("Local array IR generation is not implemented yet");
-                }
+                let alloc_ty = if let Some(len_exp) = &def.array_len {
+                    let len = len_exp.exp.eval_exp(var_map);
+                    assert!(len > 0, "array length must be positive");
+                    Type::get_array(base_ty.clone(), len as usize)
+                } else {
+                    base_ty.clone()
+                };
 
-                let alloc_ptr = func_data.dfg_mut().new_value().alloc(typ.clone());
+                let alloc_ptr = func_data.dfg_mut().new_value().alloc(alloc_ty);
                 let unique_id = var_map.get_id();
                 func_data
                     .dfg_mut()
@@ -304,22 +330,61 @@ fn process_block_item(
                     .insts_mut()
                     .push_key_back(alloc_ptr)
                     .unwrap();
+
                 if let Some(init_val) = def.init_val {
-                    let val = match init_val {
-                        crate::ast::InitVal::Exp(exp) => {
-                            exp.process_to_ir(func_data, &mut current_bb, var_map, func_map)
+                    match (def.array_len, init_val) {
+                        (Some(len_exp), crate::ast::InitVal::List(items)) => {
+                            let len = len_exp.exp.eval_exp(var_map);
+                            for i in 0..(len as usize) {
+                                let idx_val = func_data.dfg_mut().new_value().integer(i as i32);
+                                let elem_ptr = func_data
+                                    .dfg_mut()
+                                    .new_value()
+                                    .get_elem_ptr(alloc_ptr, idx_val);
+                                func_data
+                                    .layout_mut()
+                                    .bb_mut(current_bb)
+                                    .insts_mut()
+                                    .push_key_back(elem_ptr)
+                                    .unwrap();
+
+                                let init_elem = if i < items.len() {
+                                    items[i].process_to_ir(
+                                        func_data,
+                                        &mut current_bb,
+                                        var_map,
+                                        func_map,
+                                    )
+                                } else {
+                                    func_data.dfg_mut().new_value().integer(0)
+                                };
+                                let st = func_data.dfg_mut().new_value().store(init_elem, elem_ptr);
+                                func_data
+                                    .layout_mut()
+                                    .bb_mut(current_bb)
+                                    .insts_mut()
+                                    .push_key_back(st)
+                                    .unwrap();
+                            }
                         }
-                        crate::ast::InitVal::List(_) => {
+                        (Some(_), crate::ast::InitVal::Exp(_)) => {
+                            panic!("Array variable expected list initializer")
+                        }
+                        (None, crate::ast::InitVal::Exp(exp)) => {
+                            let val =
+                                exp.process_to_ir(func_data, &mut current_bb, var_map, func_map);
+                            let store_inst = func_data.dfg_mut().new_value().store(val, alloc_ptr);
+                            func_data
+                                .layout_mut()
+                                .bb_mut(current_bb)
+                                .insts_mut()
+                                .push_key_back(store_inst)
+                                .unwrap();
+                        }
+                        (None, crate::ast::InitVal::List(_)) => {
                             panic!("Scalar variable expected scalar initializer")
                         }
-                    };
-                    let store_inst = func_data.dfg_mut().new_value().store(val, alloc_ptr);
-                    func_data
-                        .layout_mut()
-                        .bb_mut(current_bb)
-                        .insts_mut()
-                        .push_key_back(store_inst)
-                        .unwrap();
+                    }
                 }
                 var_map.insert(id, SymbolInfo::Var(alloc_ptr));
             }
@@ -340,10 +405,24 @@ fn process_stmt(
         Stmt::Assign { lval, exp } => {
             let mut current_bb = bb;
             let val = exp.process_to_ir(func_data, &mut current_bb, var_map, func_map);
-            if lval.index.is_some() {
-                unimplemented!("Array element assignment IR generation is not implemented yet");
-            }
-            if let Some(dest) = var_map.get(&lval.ident) {
+            if let Some(dest_base) = var_map.get(&lval.ident) {
+                let dest = if let Some(index_exp) = lval.index {
+                    let index_val =
+                        index_exp.process_to_ir(func_data, &mut current_bb, var_map, func_map);
+                    let elem_ptr = func_data
+                        .dfg_mut()
+                        .new_value()
+                        .get_elem_ptr(dest_base, index_val);
+                    func_data
+                        .layout_mut()
+                        .bb_mut(current_bb)
+                        .insts_mut()
+                        .push_key_back(elem_ptr)
+                        .unwrap();
+                    elem_ptr
+                } else {
+                    dest_base
+                };
                 let store_inst = func_data.dfg_mut().new_value().store(val, dest);
                 func_data
                     .layout_mut()
@@ -421,7 +500,8 @@ fn process_stmt(
                 .bbs_mut()
                 .push_key_back(then_bb)
                 .unwrap();
-            let then_end_bb = process_stmt(if_stmt.then_stmt, func_data, then_bb, var_map, func_map);
+            let then_end_bb =
+                process_stmt(if_stmt.then_stmt, func_data, then_bb, var_map, func_map);
             if !is_bb_terminated(func_data, &then_end_bb) {
                 let jump_end = func_data.dfg_mut().new_value().jump(end_bb);
                 func_data
@@ -497,9 +577,10 @@ fn process_stmt(
             var_map.enter_while(&while_entry, &while_end);
 
             let mut curr_entry_bb = while_entry;
-            let cond = while_stmt
-                .cond
-                .process_to_ir(func_data, &mut curr_entry_bb, var_map, func_map);
+            let cond =
+                while_stmt
+                    .cond
+                    .process_to_ir(func_data, &mut curr_entry_bb, var_map, func_map);
             let br = func_data
                 .dfg_mut()
                 .new_value()
@@ -517,7 +598,13 @@ fn process_stmt(
                 .bbs_mut()
                 .push_key_back(while_body)
                 .unwrap();
-            let body_end_bb = process_stmt(while_stmt.body_while, func_data, while_body, var_map, func_map);
+            let body_end_bb = process_stmt(
+                while_stmt.body_while,
+                func_data,
+                while_body,
+                var_map,
+                func_map,
+            );
             if !is_bb_terminated(func_data, &body_end_bb) {
                 let jump_back_stmt = func_data.dfg_mut().new_value().jump(while_entry);
                 func_data

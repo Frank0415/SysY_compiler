@@ -215,9 +215,7 @@ impl EvalExp for Exp {
                 if lv.index.is_some() {
                     panic!("Indexed lvalue should not be evaluated at compile time")
                 }
-                var_map
-                    .get_const(&lv.ident)
-                    .expect("Undefined constant")
+                var_map.get_const(&lv.ident).expect("Undefined constant")
             }
             Exp::Binary { op, lhs, rhs } => {
                 let l = lhs.eval_exp(var_map);

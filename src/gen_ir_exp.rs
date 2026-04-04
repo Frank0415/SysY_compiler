@@ -31,10 +31,29 @@ impl ProcessIr for Exp {
             }
             Exp::Var(variable) => process_to_ir_variable(func_data, bb, variable, var_map),
             Exp::LVal(lval) => {
-                if lval.index.is_some() {
-                    unimplemented!("Array element access IR generation is not implemented yet");
+                if let Some(index_exp) = &lval.index {
+                    let src = var_map
+                        .get(&lval.ident)
+                        .unwrap_or_else(|| panic!("Undefined variable: {}", lval.ident));
+                    let index_val = index_exp.process_to_ir(func_data, bb, var_map, func_map);
+                    let elem_ptr = func_data.dfg_mut().new_value().get_elem_ptr(src, index_val);
+                    func_data
+                        .layout_mut()
+                        .bb_mut(*bb)
+                        .insts_mut()
+                        .push_key_back(elem_ptr)
+                        .unwrap();
+                    let load_inst = func_data.dfg_mut().new_value().load(elem_ptr);
+                    func_data
+                        .layout_mut()
+                        .bb_mut(*bb)
+                        .insts_mut()
+                        .push_key_back(load_inst)
+                        .unwrap();
+                    load_inst
+                } else {
+                    process_to_ir_variable(func_data, bb, &lval.ident, var_map)
                 }
-                process_to_ir_variable(func_data, bb, &lval.ident, var_map)
             }
             Exp::Call { ident, args } => {
                 process_to_ir_call(func_data, bb, var_map, func_map, ident, args)
